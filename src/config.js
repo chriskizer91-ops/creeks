@@ -6,6 +6,10 @@ Creek.CONFIG = {
   ranchName: 'Bluestem Ranch',
   creekName: 'Plum Creek',
 
+  // Feature modules to load, in order: each id is a script src/mod-<id>.js (see docs/EXTENSION_API.md).
+  // ?mods=a,b in the address replaces this list ("?mods=" means none); ?addmods=c adds to it.
+  modules: [],
+
   // The ranch: 1400 m × 1450 m = 2.03 km² ≈ 502 acres. x runs west→east, y runs north→south (downhill).
   mapW: 1400, mapH: 1450,
   ranchAcres: 500, watershedAcres: 2500,       // the creek drains ~2,500 acres; you own 500 of them

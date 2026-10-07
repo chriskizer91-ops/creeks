@@ -14,7 +14,9 @@
      M  ground:   moisture | soil type | organic matter | field number
      C  record:   water soaked in (m) | - | deepest water seen (m) | fastest water seen (m/s)
      B  bank map (R32F): lowest ground within ~12 m (so a cell knows how tall its bank is)
-     I  the land as it was at the start (never changes) — for "soil lost / gained" views  */
+     I  the land as it was at the start (never changes) — for "soil lost / gained" views
+   Also here for other code to use: sim.restore(T, M) puts saved land back, sim.sampleLine(...) reads a straight
+   line across the land (for cross-sections), sim.probe / read* read single spots or whole grids.  */
 (function () {
   const C = Creek.CONFIG, S = C.sim;
   const MMHR = 2.7778e-7;
@@ -263,6 +265,30 @@ void main(){
 uniform sampler2D u_M; uniform float u_base, u_keep; out vec4 o;
 void main(){ vec4 m = texelFetch(u_M, ivec2(gl_FragCoord.xy), 0); m.r = u_base + (m.r-u_base)*u_keep; o = m; }`;
 
+  // A straight line across the map, read into a tiny n x 1 target: one texel per sample point.
+  // Output 0 = terrain: height | limestone | cover | growth.  Output 1 = water and ground: depth | organic matter | soil | inside-the-map (1/0).
+  // Heights, depth and organic matter are blended between the four nearest cells (so a profile is smooth); cover and soil are read from the cell itself.
+  FS.line = HEAD + `
+uniform sampler2D u_T, u_W, u_M; uniform vec2 u_a, u_b; uniform int u_cnt;
+layout(location=0) out vec4 oT; layout(location=1) out vec4 oWM;
+ivec2 cl(ivec2 c){ return clamp(c, ivec2(0), u_n-ivec2(1)); }
+vec4 bil(sampler2D s, vec2 w){
+  vec2 g = w/u_dx-0.5; ivec2 i = ivec2(floor(g)); vec2 f = fract(g);
+  return mix(mix(texelFetch(s,cl(i),0), texelFetch(s,cl(i+ivec2(1,0)),0), f.x),
+             mix(texelFetch(s,cl(i+ivec2(0,1)),0), texelFetch(s,cl(i+ivec2(1,1)),0), f.x), f.y);
+}
+void main(){
+  int i = int(gl_FragCoord.x);
+  float t = u_cnt > 1 ? float(i)/float(u_cnt-1) : 0.;
+  vec2 w = mix(u_a, u_b, t), size = vec2(u_n)*u_dx;
+  float inside = (w.x>=0. && w.y>=0. && w.x<size.x && w.y<size.y) ? 1. : 0.;
+  vec2 q = clamp(w, vec2(0.), size-vec2(1e-3));                  // outside the map: the nearest edge cell (see "inside")
+  ivec2 c = cl(ivec2(floor(q/u_dx)));
+  vec4 tc = texelFetch(u_T,c,0), mc = texelFetch(u_M,c,0), tb = bil(u_T,q), wb = bil(u_W,q), mb = bil(u_M,q);
+  oT = vec4(tb.r, tb.g, tc.b, tc.a);
+  oWM = vec4(wb.r, mb.b, mc.g, inside);
+}`;
+
   FS.copy = HEAD + `
 uniform sampler2D u_src; out vec4 o;
 void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
@@ -358,6 +384,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     for (const k in this.tex) [].concat(this.tex[k]).forEach(t => gl.deleteTexture(t));
     for (const k in this._fbos) gl.deleteFramebuffer(this._fbos[k]);
     this._fbos = {};
+    if (this._line) { this._line.forEach(t => gl.deleteTexture(t)); this._line = null; }
   };
 
   P._cur = function (k) { return this.tex[k][this.i[k]]; };
@@ -459,6 +486,22 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     this.i.W = 0; this.i.F = 0; this.i.C = 0; this.undoOK = false; this.refreshBank();
   };
 
+  /** Put saved land back: T and M are Float32Arrays (or null to leave that one alone) of length nx*ny*4, laid out like
+      sim.readTerrain() / sim.readMoisture(). Water on the ground is left as it is. Then the bank map is refreshed.
+      If `onRestore` is set (the game does this) it is called afterwards, so listeners hear that the land changed. */
+  P.restore = function (T, M) {
+    const gl = this.gl, n = this.nx * this.ny * 4;
+    const up = (t, d, what) => {
+      if (!d) return;
+      if (!(d instanceof Float32Array)) d = Float32Array.from(d);
+      if (d.length !== n) throw new Error('sim.restore: ' + what + ' has ' + d.length + ' numbers, expected ' + n);
+      gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.nx, this.ny, gl.RGBA, gl.FLOAT, d);
+    };
+    up(this._cur('T'), T, 'T'); up(this._cur('M'), M, 'M');
+    this.undoOK = false; this.refreshBank();
+    if (this.onRestore) this.onRestore();
+  };
+
   // ---- reading data back (for numbers, hints and the reports) -----------------------------------
   P._read = function (tex, x, y, w, h) {
     const gl = this.gl, out = new Float32Array(w * h * 4);
@@ -475,6 +518,35 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     const x = Math.min(this.nx - 1, Math.max(0, Math.floor(mx / this.dx))), y = Math.min(this.ny - 1, Math.max(0, Math.floor(my / this.dx)));
     const t = this._read(this._cur('T'), x, y, 1, 1), w = this._read(this._cur('W'), x, y, 1, 1), m = this._read(this._cur('M'), x, y, 1, 1);
     return { h: t[0], bed: t[1], cover: Math.round(t[2]), growth: t[3], depth: w[0], mud: w[1], speed: Math.hypot(w[2], w[3]), moist: m[0], soil: Math.round(m[1]), som: m[2], field: Math.round(m[3]) };
+  };
+  /** Read n points (1..512) evenly along the straight line from (x0,y0) to (x1,y1), in metres. One tiny GPU pass.
+      Returns Float32Arrays of length n: dist (metres along the line), h (ground height), bed (limestone height),
+      cover (cover id), growth (0..1), depth (water depth, m), som (organic matter 0..1), soil (0 clay / 1 loam),
+      and inside (1 if the point is on the map, 0 if not: points off the map are read from the nearest edge cell). */
+  P.sampleLine = function (x0, y0, x1, y1, n) {
+    const gl = this.gl; n = Math.max(1, Math.min(512, Math.round(n) || 2));
+    if (!this._line) {
+      const mk = () => {
+        const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 512, 1, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        return t;
+      };
+      this._line = [mk(), mk()];
+    }
+    this._pass('line', { u_T: this._cur('T'), u_W: this._cur('W'), u_M: this._cur('M') }, this._line, (s) => {
+      gl.viewport(0, 0, n, 1); s.v2('u_a', x0, y0); s.v2('u_b', x1, y1); s.i('u_cnt', n);
+    });
+    const a = this._read(this._line[0], 0, 0, n, 1), b = this._read(this._line[1], 0, 0, n, 1), len = Math.hypot(x1 - x0, y1 - y0);
+    const o = { dist: new Float32Array(n), h: new Float32Array(n), bed: new Float32Array(n), cover: new Float32Array(n), growth: new Float32Array(n),
+      depth: new Float32Array(n), som: new Float32Array(n), soil: new Float32Array(n), inside: new Float32Array(n) };
+    for (let i = 0; i < n; i++) {
+      o.dist[i] = n > 1 ? len * i / (n - 1) : 0;
+      o.h[i] = a[i * 4]; o.bed[i] = a[i * 4 + 1]; o.cover[i] = Math.round(a[i * 4 + 2]); o.growth[i] = a[i * 4 + 3];
+      o.depth[i] = Math.max(0, b[i * 4]); o.som[i] = b[i * 4 + 1]; o.soil[i] = Math.round(b[i * 4 + 2]); o.inside[i] = b[i * 4 + 3] > 0.5 ? 1 : 0;
+    }
+    return o;
   };
   /** Flow (m³/s) and mud crossing the line between rows y and y+1, for columns x0..x1 (metres). */
   P.flowAcross = function (yMeters, x0, x1) {

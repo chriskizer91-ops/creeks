@@ -1,6 +1,9 @@
 /* Screen furniture: tool tray, storm buttons, hints, picture cards, ranch books, menus.
    Pictures live in assets/. Each slot below can name a picture and a fallback; if neither
-   file exists the card simply shows a plain placeholder, so the game works without them. */
+   file exists the card simply shows a plain placeholder, so the game works without them.
+   Feature modules add their own buttons, settings, panels and tools through the helpers
+   near the bottom (ui.styles, ui.addButton, ui.addMenuItem, ui.addSetting, ui.panel, ui.addTool);
+   they are described in docs/EXTENSION_API.md. */
 (function () {
   const C = Creek.CONFIG;
   const $ = (id) => document.getElementById(id);
@@ -42,6 +45,8 @@
     try { const s = JSON.parse(localStorage.getItem('creek.seen') || '{}'); if (set) { s[k] = 1; localStorage.setItem('creek.seen', JSON.stringify(s)); } return !!s[k]; } catch (e) { return false; }
   }
   const money = (v) => (v < 0 ? '−$' : '$') + Math.abs(Math.round(v)).toLocaleString();
+  const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  ui.esc = esc;
   const SEASON_NAME = { summer: 'Summer', fall: 'Fall', winter: 'Winter', spring: 'Spring' };
   ui.money = money;
 
@@ -99,16 +104,13 @@
   // ---------------------------------------------------------------- init
   ui.init = function (game) {
     ui.game = game;
-    const tools = $('tools');
-    Creek.TOOLS.forEach((t) => {
-      const b = document.createElement('button'); b.className = 'tool'; b.dataset.id = t.id;
-      b.innerHTML = '<span class="ic">' + t.icon + '</span>' + t.label; b.onclick = () => ui.pickTool(t.id); tools.appendChild(b);
-    });
+    ui.buildTools();
     $('btnUndo').onclick = () => { if (!game.undo()) ui.toast('Nothing to undo.'); };
-    $('btnLines').onclick = () => { game.contourOn = !game.contourOn; $('btnLines').classList.toggle('on', game.contourOn); };
-    const LENS = [['🗺️ Map', 'Back to the map.'], ['🟤 Soil health', 'Soil health: dark = rich in organic matter, pale = tired soil. Rich soil soaks up water.'],
-      ['🔴 Soil moved', 'Soil moved since the start: red = washed away, blue = piled up. This is where the land is changing.'], ['🔵 Flood depth', 'How deep the water got in the last storm. Dark blue is deepest.']];
-    $('btnLens').onclick = () => { game.lens = (game.lens + 1) % 4; $('btnLens').textContent = LENS[game.lens][0]; $('btnLens').classList.toggle('on', !!game.lens); ui.toast(LENS[game.lens][1]); };
+    ui.toggleLines = () => { game.contourOn = !game.contourOn; $('btnLines').classList.toggle('on', game.contourOn); };
+    $('btnLines').onclick = () => ui.toggleLines();
+    // the view button walks through game.lenses (the four built-in views, then any a module added)
+    $('btnLens').onclick = () => game.nextLens();
+    game.on('lens', () => ui.lensChanged());
     $('btnMenu').onclick = () => ui.menu();
     $('btnCash').onclick = () => ui.books();
     document.querySelectorAll('.storm').forEach((b) => b.onclick = () => ui.onStorm && ui.onStorm(+b.dataset.size));
@@ -130,9 +132,34 @@
     game.cbs.stormEnd = (r) => { $('stormProg').classList.add('hidden'); ui.lockStorms(false); ui.refreshHints(); ui.stormEndHook ? ui.stormEndHook(r) : ui.report(r); };
     game.cbs.scale = ui.scale;
     game.cbs.labels = ui.labels;
-    game.cbs.error = (e) => ui.card({ title: 'Something went wrong', text: String(e && e.message || e), buttons: [{ label: 'OK' }] });
+    game.cbs.error = (e) => { if ($('modal').classList.contains('hidden')) ui.card({ title: 'Something went wrong', text: String(e && e.message || e), buttons: [{ label: 'OK' }] }); };
     setInterval(ui.tick, 250);
     ui.updateTools();
+    ui.addBuiltinSettings();
+    ui.addBuiltinShortcuts();
+  };
+
+  /** The view button follows game.lenses[game.lensIdx]. */
+  ui.lensChanged = function () {
+    const g = ui.game, L = g.lenses[g.lensIdx], b = $('btnLens'); if (!L) return;
+    b.textContent = L.label; b.classList.toggle('on', g.lensIdx !== 0);
+    if (L.toast) ui.toast(L.toast);
+  };
+
+  // Keys that work everywhere (the dispatcher itself is in core.js: it skips typing and open cards)
+  ui.addBuiltinShortcuts = function () {
+    const g = ui.game, sc = Creek.shortcuts;
+    for (let i = 1; i <= 9; i++) sc.add({ key: String(i), hidden: i > 1, desc: 'Pick a tool (1 to 9, left to right along the tray)', fn: () => {
+      const t = Creek.TOOLS[i - 1]; if (!t || !g.ready) return false; ui.pickTool(t.id);
+    } });
+    sc.add({ key: 'z', desc: 'Undo', fn: () => { if (!g.ready) return false; if (!g.undo()) ui.toast('Nothing to undo.'); } });
+    sc.add({ key: 'l', desc: 'Contour lines on or off', fn: () => { if (!g.ready) return false; ui.toggleLines(); } });
+    sc.add({ key: 'v', desc: 'Next view (map, soil, flood...)', fn: () => { if (!g.ready) return false; g.nextLens(); } });
+    sc.add({ key: '?', desc: 'Show this list of keys', fn: () => { ui.showShortcuts(); } });
+  };
+  ui.showShortcuts = function () {
+    const rows = Creek.shortcuts.list().map((s) => '<tr><td><span class="pill">' + esc(s.label) + '</span></td><td>' + esc(s.desc) + '</td></tr>').join('');
+    return ui.card({ title: 'Keyboard shortcuts', html: '<table class="res small">' + (rows || '<tr><td>No shortcuts yet.</td></tr>') + '</table>', buttons: [{ label: 'Close' }] });
   };
 
   ui.lockStorms = function (lock) { document.querySelectorAll('.storm').forEach(b => b.disabled = lock); };
@@ -140,7 +167,7 @@
     const g = ui.game, st = g.storm; if (!st) return;
     const pct = Math.min(1, st.t / (C.stormBurst + C.stormTail));
     $('stormBar').style.width = (pct * 100) + '%';
-    const phase = st.t < C.stormBurst ? 'Raining' : 'Draining';
+    const phase = g.paused ? 'Paused' : st.t < C.stormBurst ? 'Raining' : 'Draining';
     $('stormLabel').textContent = phase + ' · ' + Math.round(pct * 100) + '%';
   };
   setInterval(() => { const g = ui.game; if (g && g.contourStep) $('linesText').textContent = g.contourOn ? 'Lines every ' + g.contourStep + ' m' : 'Lines off'; }, 500);
@@ -149,15 +176,27 @@
   ui.pickTool = function (id) {
     const g = ui.game;
     if (!g.setTool(id)) return;
-    const t = Creek.TOOLS.find(x => x.id === id);
-    if (t.card && !seen(t.card)) {
-      seen(t.card, true); const h = ui.HOWTO[t.card];
+    const t = Creek.TOOLS.find(x => x.id === id), h = t && t.card && ui.HOWTO[t.card];   // modules can add their own: ui.HOWTO[key] = {img, title, text}
+    if (h && !seen(t.card)) {
+      seen(t.card, true);
       ui.card({ img: h.img, square: h.square, title: h.title, text: h.text, buttons: [{ label: 'Got it' }] });
-    } else ui.toast(t.help);
+    } else if (t && t.help) ui.toast(t.help);
+  };
+  /** (Re)build the tool tray from Creek.TOOLS. */
+  ui.buildTools = function () {
+    const tools = $('tools'); tools.innerHTML = '';
+    Creek.TOOLS.forEach((t, i) => {
+      const b = document.createElement('button'); b.className = 'tool'; b.dataset.id = t.id; b.title = t.label + (i < 9 ? ' (key ' + (i + 1) + ')' : '');
+      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = t.icon; b.appendChild(ic); b.appendChild(document.createTextNode(t.label));
+      b.onclick = () => ui.pickTool(t.id); tools.appendChild(b);
+    });
   };
   ui.updateTools = function () {
     const g = ui.game;
     document.querySelectorAll('.tool').forEach((b) => { b.classList.toggle('sel', b.dataset.id === g.tool); b.classList.toggle('locked', !g.canUse(b.dataset.id)); });
+    // the tray scrolls sideways when it holds more tools than fit: keep the chosen one in view (a key press or a hint can pick a hidden one)
+    const selEl = document.querySelector('.tool.sel'), tray = $('tools');
+    if (selEl && tray.scrollWidth > tray.clientWidth) { const l = selEl.offsetLeft - tray.offsetLeft; if (l < tray.scrollLeft || l + selEl.offsetWidth > tray.scrollLeft + tray.clientWidth) tray.scrollLeft = Math.max(0, l - 8); }
     const t = Creek.TOOLS.find(x => x.id === g.tool), vb = $('variants');
     vb.innerHTML = '';
     if (t && t.opts) {
@@ -196,6 +235,9 @@
   };
 
   ui.scale = function (s) {
+    const sb = $('scalebar');
+    if (!s) { if (!sb.classList.contains('off')) sb.classList.add('off'); return; }      // 3D view: a scale bar would be wrong
+    if (sb.classList.contains('off')) sb.classList.remove('off');
     const m = [1, 2, 5, 10, 20, 50, 100, 200, 500]; let len = 10;
     for (const v of m) if (v * s <= 110) len = v;
     $('scaleLine').style.width = (len * s) + 'px'; $('scaleText').textContent = len >= 1000 ? len / 1000 + ' km' : len + ' m';
@@ -219,13 +261,13 @@
     ui.labels();
   };
   ui.labels = function () {
-    const g = ui.game, s = g.cam.scale;
+    const g = ui.game, s = g.cam.scale, flat = !g.provider();       // the zoom limits only make sense on the flat map
     for (const L of ui.labelEls) {
-      const show = s <= L.max && s >= L.min;
+      let show = !flat || (s <= L.max && s >= L.min), p = null;
+      if (show) { p = g.project(L.x, L.y); if (!p || p.visible === false) show = false; }   // 3D view: hide labels it cannot place
       if (!show) { if (L.shown !== false) { L.el.style.display = 'none'; L.shown = false; } continue; }
       if (L.f && L.f.use !== L.use) { L.use = L.f.use; L.el.innerHTML = C.uses[L.f.use].icon + ' <b>' + L.f.name + '</b>'; }
       if (L.shown !== true) { L.el.style.display = ''; L.shown = true; }
-      const p = g.project(L.x, L.y);
       L.el.style.transform = 'translate(' + Math.round(p.x) + 'px,' + Math.round(p.y) + 'px) translate(-50%,-50%)';
     }
   };
@@ -284,11 +326,14 @@
   // ---------------------------------------------------------------- menu & picture book
   ui.menu = async function () {
     const g = ui.game;
+    const extra = ui.menuItems.map((m, i) => ({ label: m.label, value: 'mod:' + i, alt: m.alt !== false }));
     const v = await ui.card({
       title: C.ranchName, text: 'Detail: ' + C.levelNames[g.level] + '. ' + (ui.mode === 'story' ? 'You are playing the story.' : 'You are in free play.'),
-      buttons: [{ label: 'Story: the first years', value: 'story' }, { label: 'Free play', value: 'free' }, { label: 'Change detail level', value: 'level', alt: true }, { label: 'Picture book', value: 'book', alt: true }, { label: 'Start the ranch over', value: 'reset', alt: true }, { label: 'Close', value: 'close', alt: true }]
+      buttons: [{ label: 'Story: the first years', value: 'story' }, { label: 'Free play', value: 'free' }, { label: 'Change detail level', value: 'level', alt: true }, { label: 'Picture book', value: 'book', alt: true }, { label: 'Settings', value: 'settings', alt: true }]
+        .concat(extra, [{ label: 'Start the ranch over', value: 'reset', alt: true }, { label: 'Close', value: 'close', alt: true }])
     });
-    if (v === 'story') Creek.story.start(); else if (v === 'free') Creek.story.free(); else if (v === 'level') ui.levelPicker(); else if (v === 'book') ui.book(); else if (v === 'reset') { g.resetMap(); ui.toast('The ranch is back as you found it.'); ui.refreshHints(); ui.refreshSeasonBar(); }
+    if (v === 'story') Creek.story.start(); else if (v === 'free') Creek.story.free(); else if (v === 'level') ui.levelPicker(); else if (v === 'book') ui.book(); else if (v === 'settings') ui.settings(); else if (v === 'reset') { g.resetMap(); ui.toast('The ranch is back as you found it.'); ui.refreshHints(); ui.refreshSeasonBar(); }
+    else if (typeof v === 'string' && v.indexOf('mod:') === 0) { const m = ui.menuItems[+v.slice(4)]; if (m && m.onClick) g._guard('menu item "' + m.label + '"', () => m.onClick(g, ui)); }
   };
   ui.levelPicker = async function () {
     const g = ui.game;
@@ -305,5 +350,134 @@
     const p = ui.card({ title: 'Picture book', html, buttons: [{ label: 'Close' }] });
     document.querySelectorAll('.gallery img').forEach((im) => im.onclick = () => { $('modal').classList.add('hidden'); ui.card({ img: all[+im.dataset.i], buttons: [{ label: 'Back', value: 'b' }] }).then(ui.book); });
     return p;
+  };
+
+  // ---------------------------------------------------------------- helpers for feature modules
+  // Everything below is for other scripts (src/mod-*.js) to build on. Each add... call is safe to repeat with the same
+  // id (the first one wins), so a module that runs twice does not get two buttons.
+  ui._added = {};
+
+  /** Put a <style> with this CSS into the page. Returns the element. */
+  ui.styles = function (css) {
+    const el = document.createElement('style'); el.textContent = css; document.head.appendChild(el); return el;
+  };
+
+  /** A chip button. slot "view" = the row under the menu button (next to Lines / View, scrolls sideways when crowded);
+      slot "top" = the row at the top right, beside the cash chip. {slot, id, label, title, onClick(on, el), toggle, on}.
+      A toggle button flips its "on" look and passes the new state to onClick. Returns the element. */
+  ui.addButton = function (o) {
+    o = o || {};
+    const key = o.id && 'button:' + o.id; if (key && ui._added[key]) return ui._added[key];
+    const b = document.createElement('button'); b.className = 'chip' + (o.on ? ' on' : '');
+    if (o.id) { if (document.getElementById(o.id)) console.warn('[creek] an element with id "' + o.id + '" exists already'); else b.id = o.id; b.dataset.modId = o.id; }
+    b.textContent = o.label || ''; if (o.title) { b.title = o.title; b.setAttribute('aria-label', o.title); }
+    b.onclick = (ev) => {
+      let on; if (o.toggle) { on = !b.classList.contains('on'); b.classList.toggle('on', on); }
+      if (o.onClick) ui.game._guard('button "' + (o.id || o.label) + '"', () => o.onClick(on, b, ev));
+    };
+    (o.slot === 'top' ? $('topRight') : $('topbar2')).appendChild(b);
+    if (key) ui._added[key] = b;
+    return b;
+  };
+
+  // The menu card: extra buttons between "Settings" and "Start the ranch over".
+  ui.menuItems = [];
+  /** {label, onClick(game, ui), alt}. alt (default true) = the quieter clay-coloured button. */
+  ui.addMenuItem = function (o) {
+    if (!o || !o.label) return;
+    if (ui.menuItems.some(m => m.label === o.label)) return;
+    ui.menuItems.push(o);
+  };
+
+  // The Settings card.
+  ui.settingDefs = [];
+  /** {id, label, help, type: "toggle"|"slider"|"choice", options (choice: ["a","b"] or [{value,label}]), min, max, step, default,
+      get(), set(value)}. Without get/set the value lives in Creek.settings under this id. */
+  ui.addSetting = function (o) {
+    if (!o || !o.id || !o.label || !/^(toggle|slider|choice)$/.test(o.type)) { console.warn('[creek] addSetting needs {id, label, type: toggle|slider|choice}'); return; }
+    if (ui.settingDefs.some(d => d.id === o.id)) return;
+    ui.settingDefs.push(o);
+  };
+  ui.addBuiltinSettings = function () {
+    const g = ui.game;
+    ui.addSetting({ id: 'contours', label: 'Contour lines on the map', help: 'The brown lines that join points of the same height.', type: 'toggle',
+      get: () => g.contourOn, set: (v) => { if (v !== g.contourOn) ui.toggleLines(); } });
+  };
+  ui.settings = async function () {
+    const v = await ui.card({
+      title: 'Settings', html: '<div class="setrows"></div>', buttons: [{ label: 'Close' }, { label: 'Keyboard shortcuts', value: 'keys', alt: true }],
+      onShow: (card) => {
+        const box = card.querySelector('.setrows');
+        ui.settingDefs.forEach((d) => {
+          const get = () => (d.get ? d.get() : Creek.settings.get(d.id, d.default));
+          const set = (val) => { if (d.set) d.set(val); else Creek.settings.set(d.id, val); };
+          const row = document.createElement('div'); row.className = 'srow';
+          const lab = document.createElement('div'); lab.className = 'slabel'; lab.textContent = d.label;
+          if (d.help) { const h = document.createElement('small'); h.textContent = d.help; lab.appendChild(h); }
+          row.appendChild(lab);
+          let cur; try { cur = get(); } catch (e) { cur = d.default; }
+          if (d.type === 'toggle') {
+            const b = document.createElement('button'); b.className = 'sw'; b.setAttribute('role', 'switch');
+            const show = (on) => { b.classList.toggle('on', !!on); b.setAttribute('aria-checked', on ? 'true' : 'false'); };
+            show(cur); b.onclick = () => { const nv = !b.classList.contains('on'); guardSetting(() => set(nv)); let now = nv; try { now = get(); } catch (e) { /* keep */ } show(now); };
+            row.appendChild(b);
+          } else if (d.type === 'slider') {
+            const wrap = document.createElement('div'); wrap.className = 'sslider';
+            const r = document.createElement('input'); r.type = 'range'; r.min = d.min != null ? d.min : 0; r.max = d.max != null ? d.max : 1; r.step = d.step != null ? d.step : 0.01; r.value = cur != null ? cur : r.min;
+            const val = document.createElement('span'); val.className = 'sval'; val.textContent = r.value;
+            r.oninput = () => { val.textContent = r.value; guardSetting(() => set(+r.value)); };
+            wrap.appendChild(r); wrap.appendChild(val); row.appendChild(wrap);
+          } else {
+            const wrap = document.createElement('div'); wrap.className = 'schoice';
+            (d.options || []).forEach((op) => {
+              const value = op && typeof op === 'object' ? op.value : op, label = op && typeof op === 'object' ? (op.label || op.value) : op;
+              const b = document.createElement('button'); b.textContent = label; b.className = value === cur ? 'on' : '';
+              b.onclick = () => { guardSetting(() => set(value)); wrap.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); };
+              wrap.appendChild(b);
+            });
+            row.appendChild(wrap);
+          }
+          box.appendChild(row);
+        });
+        if (!ui.settingDefs.length) box.textContent = 'Nothing to adjust yet.';
+      }
+    });
+    if (v === 'keys') ui.showShortcuts();
+  };
+  function guardSetting(fn) { ui.game._guard('setting', fn); }
+
+  // Floating panels: small boxes over the map.
+  ui.panels = {};
+  /** {id, title, corner: "tl"|"tr"|"bl"|"br"|"center", closable, onShow(), onHide()}. Starts hidden.
+      Returns {el, body, show(), hide(), toggle(), setTitle(t), visible}. Put your content in `body`.
+      onHide also runs when the player closes the panel with its ✕ (so you can untick your toggle button).
+      Asking again for the same id gives the same panel back. */
+  ui.panel = function (o) {
+    o = o || {};
+    if (o.id && ui.panels[o.id]) return ui.panels[o.id];
+    const el = document.createElement('div'); el.className = 'panel hidden corner-' + (o.corner || 'tr'); if (o.id) el.dataset.panel = o.id;
+    const head = document.createElement('div'); head.className = 'phead';
+    const title = document.createElement('b'); title.textContent = o.title || ''; head.appendChild(title);
+    const body = document.createElement('div'); body.className = 'pbody';
+    const fire = (fn) => { if (fn) ui.game._guard('panel "' + (o.id || o.title) + '"', fn); };
+    const api = { el, body, visible: false,
+      show() { const was = api.visible; el.classList.remove('hidden'); api.visible = true; if (!was) fire(o.onShow); return api; },
+      hide() { const was = api.visible; el.classList.add('hidden'); api.visible = false; if (was) fire(o.onHide); return api; },
+      toggle() { return api.visible ? api.hide() : api.show(); },
+      setTitle(t) { title.textContent = t; return api; } };
+    if (o.closable !== false) {
+      const x = document.createElement('button'); x.className = 'px'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close'); x.onclick = () => api.hide(); head.appendChild(x);
+    }
+    el.appendChild(head); el.appendChild(body); $('app').appendChild(el);
+    if (o.id) ui.panels[o.id] = api;
+    return api;
+  };
+
+  /** Add a tool to the tray (see Creek.TOOLS in game.js; kind "custom" tools have {custom: {down, move, up, cancel}}).
+      Custom tools that never change the land should say readonly: true so the story does not lock them. */
+  ui.addTool = function (def) {
+    if (!def || !def.id || !def.label) { console.warn('[creek] addTool needs {id, icon, label, kind}'); return null; }
+    const old = Creek.TOOLS.find(t => t.id === def.id); if (old) return old;
+    Creek.TOOLS.push(def); ui.buildTools(); ui.updateTools(); return def;
   };
 })();
