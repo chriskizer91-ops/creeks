@@ -391,7 +391,8 @@
       const far = s.wb + s.run + (s.s === 0 ? 14 : 7);
       const top = (T[idx(s.x + s.nx * far, s.y + s.ny * far)] + T[idx(s.x - s.nx * far, s.y - s.ny * far)]) / 2;
       const H = Math.max(top - bed, 0); a.sum += H; a.n++; a.max = Math.max(a.max, H);
-      for (let o = -(far - 2); o <= far - 2; o += Math.max(2, dx)) {
+      const fw = s.wb + s.run + 1;
+      for (let o = -fw; o <= fw; o += Math.max(1, dx * 0.75)) {
         const k = idx(s.x + s.nx * o, s.y + s.ny * o);
         if (T[k] - bed > 0.3) { a.faces++; if (Math.round(T[k + 2]) === CV.BARE) a.bare++; }
       }

@@ -37,6 +37,7 @@ const float TAN_WET[2] = ${f(C.soil.tanWet)};
 const float ERODE[2] = ${f(C.soil.erodible)};
 const float CRIT[2] = ${f(C.soil.critSpeed)};
 const float SOM_INFIL = ${C.som.infil.toFixed(3)}, SOM_ERODE = ${C.som.erode.toFixed(3)}, SOM_STABLE = ${C.som.stable.toFixed(3)};
+const float KSH = ${(S.Ksh * S.morph).toFixed(5)};
 const float KC = ${(S.Kc * S.morph).toFixed(6)}, KS = ${S.Ks.toFixed(5)}, KD = ${S.Kd.toFixed(5)};
 bool isVeg(int c){ return c==1||c==2||c==3||c==6||c==7||c==9; }
 `;
@@ -127,12 +128,15 @@ void main(){
   if (d < 0.002){ t.r += Sd; Sd = 0.; }
   else {
     float excess = max(sp - CRIT[soil], 0.);
-    float cap = min(KC*excess*excess*(0.4+4.*sinA), 0.25) * d;
     float hb = max(t.r - texelFetch(u_B,p,0).r, 0.12), g = max(t.a, RESID[ci]);
     float protect = SURF[ci]*g*clamp(ROOTD[ci]*max(t.a,0.3*RESID[ci]*3.)/hb, 0., 1.);
+    float eroder = ERODE[soil]*(1.-protect)*(1.-SOM_ERODE*m.b);
+    // sheet and rill wash on slopes: too fine for the grid to see, so it is added as a slope-driven term
+    float capSheet = min(KSH*slope*d*eroder, 0.04*d);
+    float cap = min(KC*excess*excess*(0.4+4.*sinA), 0.25) * d + capSheet;
     if (Sd < cap && !dam){
       float avail = max(t.r - t.g, 0.);
-      float dS = min(min(KS*u_dt,1.)*ERODE[soil]*(1.-protect)*(1.-SOM_ERODE*m.b)*(cap-Sd), avail);
+      float dS = min(min(KS*u_dt,1.)*eroder*(cap-Sd), avail);
       t.r -= dS; Sd += dS;
     } else if (Sd > cap){
       float dS = min(KD*u_dt,1.)*(Sd-cap); t.r += dS; Sd -= dS;

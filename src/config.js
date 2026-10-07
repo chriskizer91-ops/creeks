@@ -41,6 +41,7 @@ Creek.CONFIG = {
   // Water engine tuning
   sim: {
     gravity: 9.81,
+    Ksh: 0.6,               // slope wash too fine for the grid (sheet and rill erosion)
     Kc: 0.0035,             // sediment carrying strength
     morph: 2.5,             // the storm is a short burst of a long real one, so land changes are speeded up
     Ks: 0.45,               // pick-up rate (1/s)
