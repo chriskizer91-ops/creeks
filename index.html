@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#f1e7cf">
+<title>Creek Care</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+
+  <div id="topbar">
+    <button id="btnMenu" class="chip" aria-label="Menu">☰</button>
+    <div id="banner" class="chip hidden"><span id="bannerText"></span><button id="bannerBtn" class="go"></button></div>
+    <div class="spacer"></div>
+    <button id="btnLines" class="chip on" title="Contour lines">〰️ Lines</button>
+    <button id="btnLens" class="chip" title="Soil and roots view">🟤 Ground</button>
+  </div>
+
+  <div id="stormbar">
+    <button class="storm" data-size="1"><b>1-year</b><small>small</small></button>
+    <button class="storm" data-size="10"><b>10-year</b><small>big</small></button>
+    <button class="storm" data-size="100"><b>100-year</b><small>huge</small></button>
+    <div id="stormProg" class="hidden"><div id="stormBar"></div><span id="stormLabel">Storm…</span><button id="stormEnd" class="go">Skip ⏩</button></div>
+  </div>
+
+  <div id="hint" class="hidden">
+    <div id="hintText"></div>
+    <div class="row"><button id="hintShow" class="go">Show me</button><button id="hintTool" class="go alt"></button><button id="hintNext" class="plain">Next tip</button><button id="hintHide" class="plain">✕</button></div>
+  </div>
+  <div id="probe" class="hidden"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="scalebar"><div id="scaleLine"></div><span id="scaleText"></span></div>
+
+  <div id="toolbar">
+    <div id="tools"></div>
+    <div id="opts">
+      <div id="sizes"><button data-s="0">•</button><button data-s="1" class="on">●</button><button data-s="2">⬤</button></div>
+      <button id="btnUndo" class="chip">↩ Undo</button>
+      <button id="btnGrow" class="chip hidden">🌱 Next season</button>
+    </div>
+  </div>
+
+  <div id="modal" class="hidden"><div id="card"></div></div>
+</div>
+<script src="src/config.js"></script>
+<script src="src/world.js"></script>
+<script src="src/sim.js"></script>
+<script src="src/render.js"></script>
+<script src="src/game.js"></script>
+<script src="src/ui.js"></script>
+<script src="src/story.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
