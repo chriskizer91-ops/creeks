@@ -11,13 +11,17 @@
 <body>
 <div id="app">
   <canvas id="gl"></canvas>
+  <div id="labels"></div>
 
   <div id="topbar">
     <button id="btnMenu" class="chip" aria-label="Menu">☰</button>
     <div id="banner" class="chip hidden"><span id="bannerText"></span><button id="bannerBtn" class="go"></button></div>
     <div class="spacer"></div>
-    <button id="btnLines" class="chip on" title="Contour lines">〰️ Lines</button>
-    <button id="btnLens" class="chip" title="Soil and roots view">🟤 Ground</button>
+    <button id="btnCash" class="chip" title="Ranch books">$0</button>
+  </div>
+  <div id="topbar2">
+    <button id="btnLines" class="chip on" title="Contour lines">〰️ <span id="linesText">Lines</span></button>
+    <button id="btnLens" class="chip" title="Change the view">🗺️ Map</button>
   </div>
 
   <div id="stormbar">
@@ -31,19 +35,21 @@
     <div id="hintText"></div>
     <div class="row"><button id="hintShow" class="go">Show me</button><button id="hintTool" class="go alt"></button><button id="hintNext" class="plain">Next tip</button><button id="hintHide" class="plain">✕</button></div>
   </div>
+  <div id="report" class="hidden"></div>
   <div id="probe" class="hidden"></div>
   <div id="toast" class="hidden"></div>
   <div id="scalebar"><div id="scaleLine"></div><span id="scaleText"></span></div>
 
   <div id="toolbar">
+    <div id="variants" class="hidden"></div>
     <div id="tools"></div>
     <div id="opts">
-      <div id="sizes"><button data-s="0">•</button><button data-s="1" class="on">●</button><button data-s="2">⬤</button></div>
+      <div id="sizes"></div>
       <button id="btnUndo" class="chip">↩ Undo</button>
-      <button id="btnGrow" class="chip hidden">🌱 Next season</button>
     </div>
   </div>
 
+  <div id="splash"><div class="box"><div id="splashText">Starting…</div><div class="bar"><div id="splashBar"></div></div></div></div>
   <div id="modal" class="hidden"><div id="card"></div></div>
 </div>
 <script src="src/config.js"></script>

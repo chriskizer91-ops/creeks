@@ -1,94 +1,119 @@
-/* Free play and the one-year Story. No timers, no way to lose.
-   Story: summer (dry creek) → fall (storms test it) → winter (planting) → spring (big storms) → before/after. */
+/* Free play and the Story. No timers, no way to lose (money can go negative; the bank waits).
+   Story: three years at the ranch. Each year: summer (dry creek, build) → fall (storms test it) →
+   winter (planting) → spring (the big storms). It opens with a "before" storm on the land as you
+   found it and closes with the same storm on the land as you left it. */
 (function () {
   const C = Creek.CONFIG, P = () => Creek.ui.PICS;
   const story = Creek.story = { token: 0 };
-  const NON_PLANT = ['look', 'dig', 'pile', 'barrel', 'garden', 'bda'];
-  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const NO_PLANTS = ['look', 'dig', 'pile', 'swale', 'pond', 'dam', 'fields'];
+  const YEARS = 3;
   const ft = (m) => (m * 3.281).toFixed(1);
+  const SEASON_NAME = { summer: 'Summer', fall: 'Fall', winter: 'Winter', spring: 'Spring' };
 
-  function stormDone(g, ui) { return new Promise((res) => { ui.stormEndHook = (r) => { ui.stormEndHook = null; res(r); }; }); }
+  function stormDone(ui) { return new Promise((res) => { ui.stormEndHook = (r) => { ui.stormEndHook = null; res(r); }; }); }
+  const money = (v) => Creek.ui.money(v);
+
+  function seasonSummary(r) {
+    return (r.net >= 0 ? 'The season earned ' : 'The season cost ') + money(Math.abs(r.net)) + '.';
+  }
 
   story.free = function () {
     const g = Creek.game, ui = Creek.ui; story.token++;
-    ui.mode = 'free'; g.allowed = null; g.setSeason(null); g.season = null; g.baseMoist = 0.15;
-    g.resetMap(); ui.setBanner(null); document.getElementById('btnGrow').classList.remove('hidden');
-    ui.onStorm = (size) => g.startStorm(size);
-    g.fitCamera(); ui.refreshHints();
-    ui.toast('Free play: everything is open. Try a storm!');
+    ui.mode = 'free'; g.allowed = null;
+    g.resetMap(); ui.stormEndHook = null; ui.onStorm = (size) => g.startStorm(size);
+    ui.advanceLabel = null;
+    ui.seasonBar(null, async () => {
+      const r = g.advanceSeason(); ui.toast(seasonSummary(r)); ui.refreshSeasonBar(); ui.refreshHints();
+    });
+    g.fitCamera(); ui.updateTools(); ui.refreshHints();
+    ui.toast('Free play: every tool is open. Try a storm.');
   };
 
   story.start = async function () {
     const g = Creek.game, ui = Creek.ui, tok = ++story.token, alive = () => tok === story.token;
-    ui.mode = 'story'; document.getElementById('btnGrow').classList.add('hidden');
-    g.resetMap(); g.allowed = ['look']; g.season = null; g.fitCamera(); ui.setBanner(null);
-    ui.onStorm = null; ui.updateTools();
+    ui.mode = 'story'; g.resetMap(); g.allowed = ['look']; g.fitCamera(); ui.seasonBar(null, null); ui.onStorm = null; ui.updateTools(); ui.advanceLabel = null;
 
-    await ui.card({ img: P().moveIn, title: 'Move-in day', text: 'The boxes are stacked on the driveway. Your house sits at the bottom of a shallow bowl of about a hundred yards. Everything that falls on them, roofs and streets and lawns, runs downhill to one place: the little creek that begins right behind your back fence.', buttons: [{ label: 'Go see the creek' }] });
-    await ui.card({ img: P().dryCreek, title: 'The creek behind the fence', text: 'It is summer, and the creek is dry. The banks are tall, bare and crumbling, and under them is pale stone. It will not stay dry. Before you unpack, picture what a big storm would do to the land as it is now.', buttons: [{ label: 'Picture it' }] });
+    await ui.card({ img: P().inherit, title: 'Bluestem Ranch', text: 'Five hundred acres are yours now: fields, pasture, prairie remnants and a creek. Plum Creek crosses the ranch, and five small draws feed it. The creek drains about 2,500 acres, and you own 500 of them. Everything that falls on the rest of that land arrives at your fence.', buttons: [{ label: 'Walk the ranch' }] });
+    await ui.card({ img: P().dryCreek, title: 'The creek', text: 'It is summer and the creek is dry. The banks are tall, bare and crumbling, and under them is pale limestone. The draws have cut gullies into the fields. It will not stay dry. Before you change anything, picture what a big storm would do to the ranch as it is.', buttons: [{ label: 'Picture it' }] });
     if (!alive()) return;
 
-    // A quick preview storm on the untouched land: it is the "before" the year is measured against.
+    // The "before": a 10-year storm on the untouched ranch.
     const beforeImg = g.snapshot(520);
     let skipped = false;
-    ui.setBanner('Imagining a big storm on the land as it is…', 'Skip', () => { skipped = true; g.stopStorm(); });
-    g.setSeason('summer'); g.baseMoist = 0.05;
-    g.startStorm(10, { turbo: true, tag: 'baseline' });
-    await stormDone(g, ui);
+    ui.seasonBar('imagining a big storm on the land as it is…', null); ui.refreshSeasonBar();
+    document.getElementById('bannerBtn').classList.add('hidden');
+    ui.stormEndHook = null;
+    g.startStorm(10, { turbo: true, tag: 'baseline', moist: 0.1 });
+    const skipBtn = document.getElementById('stormEnd'); const oldSkip = skipBtn.onclick; skipBtn.onclick = () => { skipped = true; g.stopStorm(); };
+    const stormEnded = stormDone(ui);
+    await stormEnded;
+    skipBtn.onclick = oldSkip;
     const baseline = skipped ? null : g.lastStorm;
-    g.resetMap(); g.setSeason('summer'); if (!alive()) return;
-    g.analysis = null;
+    g.resetMap(); if (!alive()) return;
+    g.analysis = null; g.baseline = baseline;
 
-    const seasons = [
-      { name: 'summer', label: 'Summer', note: 'Summer: the creek is dry. Work in it.', allowed: NON_PLANT, next: 'On to fall →' },
-      { name: 'fall', label: 'Fall', note: 'Fall: storms test what you built.', allowed: NON_PLANT, next: 'On to winter →',
-        card: { img: P().storm, title: 'Fall: the storms come', text: 'The first real rains arrive. Send a storm of your own and watch where the water goes, and what it takes with it. Fix what it shows you.' } },
-      { name: 'winter', label: 'Winter', note: 'Winter: planting season.', allowed: null, next: 'On to spring →',
-        card: { img: Creek.ui.PICS.makingRoom, title: 'Winter: planting season', text: 'The ground is soft and the plants are asleep, which is the right time to move them. Native grasses, trees and willow stakes are open to you now. Roots take a season or two to reach their depth.' } },
-      { name: 'spring', label: 'Spring', note: 'Spring: the big storms.', allowed: null, next: 'Finish the year ✓' }
-    ];
-    for (let k = 0; k < seasons.length; k++) {
-      const s = seasons[k]; if (!alive()) return;
-      g.setSeason(s.name); g.allowed = s.allowed; ui.updateTools();
-      if (s.card) await ui.card(Object.assign({ buttons: [{ label: 'Continue' }] }, s.card));
-      ui.setBanner(s.note, s.next, null);
-      ui.onStorm = (size) => g.startStorm(size);
-      ui.refreshHints();
-      await new Promise((res) => { document.getElementById('bannerBtn').onclick = () => { if (!g.storm) res(); }; });
-      if (!alive()) return;
-      if (s.name !== 'summer') g.growSeason(); else g.growSeason();
+    const years = [];
+    for (let y = 1; y <= YEARS; y++) {
+      const startCash = g.cash;
+      for (let k = 0; k < 4; k++) {
+        if (!alive()) return;
+        const season = Creek.SEASONS[k];
+        g.allowed = (season === 'winter' || season === 'spring') ? null : NO_PLANTS;
+        ui.updateTools();
+        // a little story at the start of each season in year 1
+        if (y === 1 && season === 'fall') await ui.card({ img: P().storm, title: 'Fall: the storms come', text: 'The first real rains arrive. Send a storm of your own and watch where the water goes and what it takes with it. Then fix what it shows you.', buttons: [{ label: 'Continue' }] });
+        if (y === 1 && season === 'winter') await ui.card({ img: P().winter, title: 'Winter: planting season', text: 'The ground is soft and the plants are asleep, which is the right time to move them. Native grasses, trees and willow stakes are open to you now. Roots take a season or two to reach their depth, and trees much longer.', buttons: [{ label: 'Continue' }] });
+        if (y === 1 && season === 'spring') await ui.card({ img: P().cattle, title: 'Spring: growth and big rain', text: 'Everything grows now. The big storms come in spring, so this is the test of what you did over the winter.', buttons: [{ label: 'Continue' }] });
+        const note = { summer: 'the creek is dry. Work in it.', fall: 'storms test what you built.', winter: 'planting season.', spring: 'the big storms.' }[season];
+        const last = (y === YEARS && season === 'spring');
+        ui.onStorm = (size) => g.startStorm(size);
+        ui.advanceLabel = last ? 'Finish: the final test ✓' : null;
+        await new Promise((res) => { ui.seasonBar(note, () => { res(); }); ui.refreshHints(); });
+        if (!alive()) return;
+        const r = g.advanceSeason(); ui.toast(seasonSummary(r));
+      }
+      years.push({ y, cash: g.cash, change: g.cash - startCash });
+      if (y < YEARS) {
+        const M = g.sim.readMoisture(), som = g.meanSom(M), an = g.analysis;
+        await ui.card({ img: y === 1 ? undefined : P().firstFlow, title: 'Year ' + y + ' is done', text: 'Cash: ' + money(g.cash) + ' (' + (g.cash - startCash >= 0 ? '+' : '−') + money(Math.abs(g.cash - startCash)).replace('−', '') + ' this year). Soil organic matter is ' + Math.round(som * 100) + '%. Plum Creek’s banks are ' + ft(an.main.mean) + ' feet tall and the gullies ' + ft(an.gullyMean) + ' feet. Dry-season creek flow index: ' + g.baseflow().toFixed(0) + ' L/s.', buttons: [{ label: 'On to year ' + (y + 1) }] });
+      }
     }
 
-    // The same storm again, on the year's work.
-    ui.setBanner('One last test: the same storm as the first day.', null);
+    // The same storm again, on the land as you left it (same season as the first: the crops look the same).
+    ui.advanceLabel = null; ui.seasonBar('one last test: the same storm as the first day.', null);
+    document.getElementById('bannerBtn').classList.add('hidden');
     g.allowed = ['look']; ui.updateTools(); ui.onStorm = null;
-    g.startStorm(10, { turbo: false, tag: 'final' });
-    await stormDone(g, ui);
+    g.startStorm(10, { turbo: true, tag: 'final', moist: 0.1 });
+    await stormDone(ui);
     const final = g.lastStorm; g.sim.dryOut(g.baseMoist, 0.5);
     const afterImg = g.snapshot(520);
-    ui.setBanner(null);
+    ui.seasonBar(null, null); ui.refreshSeasonBar();
     await results(g, ui, baseline, final, beforeImg, afterImg);
-    await ui.card({ img: P().neighbors, title: 'A neighbour leans on the fence', text: '“What are you doing down there?” You hand them a shovel. “Making room for the water.” By winter there are six of you in the creek, weaving branches between posts.', buttons: [{ label: 'Then what?' }] });
-    await ui.card({ img: P().yearsLater, title: 'Years later', text: 'Same street, same bowl, same creek. The water that used to rush now walks. There was never a villain here, only water and habit, and habits can change.', buttons: [{ label: 'Keep playing (free play)', value: 'free' }] });
+    await ui.card({ img: P().neighbors, title: 'A neighbour at the fence', text: '“Your creek ran in August,” says the rancher upstream. “Mine didn’t. What are you doing down there?” You hand over a shovel and a bag of seed. “Making room for the water.”', buttons: [{ label: 'Then what?' }] });
+    await ui.card({ img: P().yearsLater, title: 'Years later', text: 'Same ranch, same creek. The water that used to rush through in an afternoon now walks, and the soil keeps more of it. There was never a villain here, only water and habit, and habits can change.', buttons: [{ label: 'Keep playing (free play)', value: 'free' }] });
     story.free();
   };
 
   async function results(g, ui, b, f, beforeImg, afterImg) {
-    const A0 = g.initialAnalysis, A1 = g.analyze(g.sim.readTerrain());
-    const bath = (m3) => Math.round(m3 / 0.3), pct = (a, c) => (a > 0 ? Math.round((1 - c / a) * 100) : 0);
+    const A0 = g.initialAnalysis, A1 = f.an, ha2ac = 2.471;
+    const pct = (a, c) => (a > 0 ? Math.round((1 - c / a) * 100) : 0);
+    const row = (lab, a, c, goodDown) => '<tr><td>' + lab + '</td><td class="n">' + a + '</td><td class="n">' + c + '</td></tr>';
     const mud = (r) => (r ? (r.mudConc * 2650).toFixed(1) + ' g/L' : '—');
-    const row = (lab, a, c) => '<tr><td>' + lab + '</td><td class="n">' + a + '</td><td class="n">' + c + '</td></tr>';
-    const yardCut = b ? pct(b.volFence, f.volFence) : null, creekCut = b ? pct(b.peakOut, f.peakOut) : null;
-    let html = '<div class="pair"><figure><img src="' + beforeImg + '"><figcaption>Day one</figcaption></figure><figure><img src="' + afterImg + '"><figcaption>One year later</figcaption></figure></div>' +
-      '<table class="res"><tr><th></th><th class="n">Before</th><th class="n">After</th></tr>' +
-      row('Creek bank height', ft(A0.bankMean) + ' ft', ft(A1.bankMean) + ' ft') +
-      row('Water out the back of your yard', b ? bath(b.volFence) + ' bathtubs' : '—', bath(f.volFence) + ' bathtubs') +
-      row('How muddy the water ran', mud(b), mud(f)) +
-      row('Soil washed from creek banks', b ? Math.round(b.creekSoilLost / 0.1) + ' wheelbarrows' : '—', Math.round(f.creekSoilLost / 0.1) + ' wheelbarrows') +
-      row('Peak flow leaving the map', b ? b.peakOut.toFixed(1) + ' m³/s' : '—', f.peakOut.toFixed(1) + ' m³/s') + '</table>';
+    const startCash = C.money.start;
+    let html = '<div class="pair"><figure><img src="' + beforeImg + '"><figcaption>Day one</figcaption></figure><figure><img src="' + afterImg + '"><figcaption>After ' + 3 + ' years</figcaption></figure></div>' +
+      '<table class="res small"><tr><th></th><th class="n">Before</th><th class="n">After</th></tr>' +
+      row('Rain that soaked in', b ? Math.round(b.soakShare * 100) + '%' : '—', Math.round(f.soakShare * 100) + '%') +
+      row('Peak flow leaving the ranch', b ? Math.round(b.peakOut) + ' m³/s' : '—', Math.round(f.peakOut) + ' m³/s') +
+      row('Land flooded', b ? Math.round(b.floodHa * ha2ac) + ' acres' : '—', Math.round(f.floodHa * ha2ac) + ' acres') +
+      row('Muddiness of the water', mud(b), mud(f)) +
+      row('Soil washed off its place', b ? Math.round(b.soilLost * 1.3).toLocaleString() + ' tons' : '—', Math.round(f.soilLost * 1.3).toLocaleString() + ' tons') +
+      row('Plum Creek bank height', ft(A0.main.mean) + ' ft', ft(A1.main.mean) + ' ft') +
+      row('Gully depth (the five draws)', ft(A0.gullyMean) + ' ft', ft(A1.gullyMean) + ' ft') +
+      row('Soil organic matter', b ? Math.round(b.somMean * 100) + '%' : '—', Math.round(f.somMean * 100) + '%') +
+      row('Money in the bank', money(startCash), money(g.cash)) + '</table>';
     let text = 'Both runs are the same 10-year storm.';
-    if (b) text += ' Your yard sent ' + (yardCut >= 0 ? yardCut + '% less' : Math.abs(yardCut) + '% more') + ' water out the back. The creek’s peak flow changed by only ' + Math.abs(creekCut) + '%.';
-    text += ' That is the true part: your yard is only about 1% of this watershed (about 2,500 m² of 250,000 m²), so even a perfect yard barely moves the creek. The creek itself, and neighbours doing the same, are what change it.';
-    await ui.card({ title: 'One year at the house', text, html, buttons: [{ label: 'Continue' }] });
+    if (b) text += ' Your ranch changed the peak flow leaving it by ' + Math.abs(pct(b.peakOut, f.peakOut)) + '% (' + (pct(b.peakOut, f.peakOut) >= 0 ? 'lower' : 'higher') + ').';
+    text += ' That is the honest part: your 500 acres are one fifth of the 2,500 the creek drains. The other four fifths sent the same water as before. Work in the creek itself, and neighbours upstream doing the same, is what turns a creek around.';
+    await ui.card({ title: 'Three years at Bluestem Ranch', text, html, buttons: [{ label: 'Continue' }] });
   }
 })();

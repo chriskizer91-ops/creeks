@@ -32,7 +32,7 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; }
 #stormBar { height: 100%; width: 0; background: var(--water); }
 #stormProg .go { padding: 4px 10px; font-size: 12px; margin-left: 6px; }
 
-#hint { position: absolute; left: 10px; right: 10px; bottom: calc(112px + var(--safe-b)); max-width: 520px; margin: 0 auto; background: var(--paper); border-radius: 18px; padding: 12px 14px 8px;
+#hint { position: absolute; left: 10px; right: 10px; bottom: calc(150px + var(--safe-b)); max-width: 520px; margin: 0 auto; background: var(--paper); border-radius: 18px; padding: 12px 14px 8px;
   box-shadow: var(--shadow); font-size: 14.5px; line-height: 1.4; font-family: Georgia, serif; border-left: 6px solid var(--gold); }
 #hint .row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; font-family: system-ui, sans-serif; }
 #hint .row .go { padding: 6px 12px; font-size: 13px; }
@@ -78,3 +78,36 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; }
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .gallery img { width: 100%; border-radius: 10px; cursor: pointer; aspect-ratio: 1/1; object-fit: cover; }
 @media (min-width: 800px) { #toolbar { left: 50%; transform: translateX(-50%); max-width: 760px; border-radius: 18px; bottom: 8px; } #hint { bottom: 140px; } #scalebar { top: 62px; } }
+
+#topbar2 { position: absolute; left: 10px; top: calc(54px + var(--safe-t)); display: flex; gap: 6px; }
+#topbar2 .chip { padding: 6px 11px; font-size: 13px; }
+#scalebar { top: calc(94px + var(--safe-t)) !important; }
+#stormbar { top: calc(54px + var(--safe-t)); }
+#labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.flabel { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; line-height: 1.1; padding: 2px 6px; border-radius: 8px; background: rgba(244,236,216,.86);
+  color: var(--ink); box-shadow: 0 1px 4px rgba(59,42,26,.25); transform: translate(-50%,-50%); will-change: transform; }
+.flabel.stream { background: rgba(214,232,238,.85); color: #24505f; font-style: italic; }
+.flabel b { font-weight: 600; }
+#variants { display: flex; gap: 6px; overflow-x: auto; padding: 0 2px 6px; scrollbar-width: none; }
+#variants::-webkit-scrollbar { display: none; }
+#variants button { flex: 0 0 auto; background: var(--paper2); border-radius: 999px; padding: 6px 11px; font-size: 12.5px; }
+#variants button.sel { background: #fff6dc; outline: 2px solid var(--gold); }
+#sizes button { width: auto; min-width: 44px; padding: 0 8px; font-size: 12px; }
+#report { position: absolute; left: 10px; top: calc(130px + var(--safe-t)); max-width: 250px; background: var(--paper); border-radius: 16px; padding: 10px 12px; box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.45; }
+#report h4 { margin: 0 0 4px; font-family: Georgia, serif; font-size: 14px; }
+#report .x { position: absolute; right: 6px; top: 4px; background: transparent; padding: 4px 8px; color: var(--ink2); }
+#report .more { margin-top: 6px; padding: 5px 10px; font-size: 12px; }
+#splash { position: absolute; inset: 0; z-index: 30; background: #efe5cc; display: none; align-items: center; justify-content: center; }
+#splash.on { display: flex; }
+#splash .box { width: min(360px, 80vw); text-align: center; font-family: Georgia, serif; }
+#splash .bar { height: 8px; background: #d9ccae; border-radius: 6px; margin-top: 12px; overflow: hidden; }
+#splashBar { height: 100%; width: 0; background: var(--moss); transition: width .25s; }
+.meter { display: inline-block; width: 60px; height: 8px; border-radius: 5px; background: #d9ccae; overflow: hidden; vertical-align: middle; }
+.meter i { display: block; height: 100%; background: var(--moss); }
+.res td.neg { color: var(--clay); } .res td.pos { color: var(--moss); }
+.res.small { font-size: 12.5px; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--paper2); font-size: 12px; }
+#card .sub { font-family: system-ui, sans-serif; font-size: 13px; color: var(--ink2); margin: 2px 4px 8px; }
+#card .scroll { max-height: 38vh; overflow: auto; }
+.chip.neg { color: #a33; }
+@media (min-width: 800px) { #hint { bottom: 170px; } #scalebar { top: calc(94px + var(--safe-t)) !important; } }
