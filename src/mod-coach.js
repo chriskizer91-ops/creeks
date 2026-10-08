@@ -71,7 +71,16 @@
       const q = cm.H[v * cm.w + u]; n++; if (q < here - eps) lower++; else if (q > here + eps) higher++;
       if (q < lo) lo = q; if (q > hi) hi = q;
     }
-    return { h: here, slope: cm.S[j * cm.w + i], steep: cm.S[j * cm.w + i] >= cm.thr, lowFrac: lower / n, highFrac: higher / n, relief: hi - lo };
+    // "bowl or bump": how far the ground 24 m away (averaged all the way round) sits above this spot. A valley bottom is lower than
+    // its surroundings (positive), a ridge is higher (negative), and a plain slope is zero because up and down cancel out.
+    let ring = 0; const R = 24, N = 16;
+    for (let k = 0; k < N; k++) {
+      const a = k / N * Math.PI * 2, fx = clamp((x + R * Math.cos(a)) / cm.cs - 0.5, 0, cm.w - 1.001), fy = clamp((y + R * Math.sin(a)) / cm.cs - 0.5, 0, cm.h - 1.001);
+      const u = Math.floor(fx), v = Math.floor(fy), p = fx - u, q = fy - v, o = v * cm.w + u;
+      ring += cm.H[o] * (1 - p) * (1 - q) + cm.H[o + 1] * p * (1 - q) + cm.H[o + cm.w] * (1 - p) * q + cm.H[o + cm.w + 1] * p * q;
+    }
+    const edge = Math.min(x, y, C.mapW - x, C.mapH - y) < R + 6;
+    return { h: here, slope: cm.S[j * cm.w + i], steep: cm.S[j * cm.w + i] >= cm.thr, lowFrac: lower / n, highFrac: higher / n, relief: hi - lo, curv: ring / N - here, edge };
   }
 
   // ================================================================ streams (for the trace and section lessons)
@@ -322,6 +331,8 @@
     if (!game.canUse(id)) { ui.toast(id === 'swale' ? 'The swale tool opens later in the story. Free play (in the menu) has every tool open.' : 'That tool is not open yet.'); return false; }
     ui.pickTool(id); return true;
   }
+  // Look at a spot with it a little above the middle of the screen: the hint box and the helper panels sit low on a phone
+  function lookAt(x, y, scale) { game.focusOn(x, y + (game.ch || 600) * 0.1 / scale, scale); }
   const L = {};          // working progress that is not remembered between visits (spots tapped and so on)
   const fmtM = (m) => (Math.round(m * 10) / 10).toFixed(1) + ' m';
 
@@ -331,19 +342,19 @@
       task: () => 'Use the Look tool 👆 on 3 different spots, some high and some low. Watch the height change.',
       stat: () => 'Spots read: ' + (L.spots ? L.spots.length : 0) + ' of 3' + (L.spots && L.spots.length ? ' (' + L.spots.map((s) => fmtM(s.h)).join(', ') + ')' : ''),
       cheer: 'You can read a contour line! Every point on one line is the same height.',
-      go() { pickTool('look'); const c = creekMid(0.5); game.focusOn(c.x, c.y, FOCUS(330)); } },
+      go() { pickTool('look'); const c = creekMid(0.5); lookAt(c.x, c.y, FOCUS(330)); } },
     { id: 'L2', title: 'Close lines mean steep',
       body: 'Where brown lines are squeezed close together, the ground climbs fast: it is steep, and water runs fast. Where the lines are far apart, the ground is gentle and water walks.',
       task: () => 'Find a very steep place and tap it with Look. Hint: the creek banks and gullies are steep.',
       stat: () => L.steepMsg || 'Look for lines packed close together.',
       cheer: 'Steep ground found! Lines close together mean a steep slope.',
-      go() { pickTool('look'); const cm = coarse(); const p = cm ? cm.steep : creekMid(0.5); game.focusOn(p.x, p.y, FOCUS(220)); } },
+      go() { pickTool('look'); const cm = coarse(); const p = cm ? cm.steep : creekMid(0.5); lookAt(p.x, p.y, FOCUS(220)); } },
     { id: 'L3', title: 'Valleys point uphill',
       body: 'Lines bend around a valley like a V that points uphill, and water collects at the bottom of it. A ridge is the high back of a hill: rain on one side runs one way, rain on the other side runs the other way.',
       task: () => 'Tap the bottom of a gully or the creek, then tap a ridge, a high spot between two valleys.',
       stat: () => 'Valley bottom: ' + (L.valley ? '✓' : 'not yet') + '  ·  Ridge: ' + (L.ridge ? '✓' : 'not yet'),
       cheer: 'Valley and ridge found! Water always runs from the ridge down into the valley.',
-      go() { pickTool('look'); const c = creekMid(0.45); game.focusOn(c.x, c.y, FOCUS(260)); } },
+      go() { pickTool('look'); const c = creekMid(0.45); lookAt(c.x, c.y, FOCUS(260)); } },
     { id: 'L4', title: 'Follow a contour',
       body: 'A swale is a ditch dug along a contour line. Every spot on the line is the same height, so the ditch is level. Water in a level ditch stops, spreads out and soaks in. A ditch that wanders uphill and downhill does not.',
       task: () => 'Pick the Swale tool and drag along a brown line for at least 30 m. Stay on the line! Zoom in until the lines are close enough to follow.',
@@ -351,20 +362,20 @@
       cheer: 'A level swale! It will hold the water and let it soak in.',
       go() {
         pickTool('swale'); const f = game.fields.filter((q) => q.kind === 'field')[0] || { cx: creekMid(0.3).x, cy: creekMid(0.3).y };
-        game.focusOn(f.cx, f.cy, Math.max(1.8, FOCUS(160)));
+        lookAt(f.cx, f.cy, Math.max(1.8, FOCUS(160)));
       } },
     { id: 'L5', title: 'Where does water go?',
       body: 'Water runs straight downhill, across the brown lines and never along them. Rain on a whole hillside gathers in the nearest valley, then flows to the creek.',
       task: () => (hasTool('trace') ? 'Pick the Trace tool 🌧️ and tap Plum Creek. Everything that lights up drains to that spot.' : 'Press a storm button, then use the Look tool on deep water in the creek.'),
       stat: () => (hasTool('trace') ? 'Tap the creek with the Trace tool, or watch a storm and Look at deep water.' : (L.stormSeen ? 'Storm sent. Now Look at some deep water.' : 'Send a storm first.')),
       cheer: 'Now you know where the water goes: downhill, into the valley, down to the creek.',
-      go() { const c = creekMid(0.5); game.focusOn(c.x, c.y, FOCUS(330)); if (hasTool('trace')) pickTool('trace'); else pickTool('look'); } },
+      go() { const c = creekMid(0.5); lookAt(c.x, c.y, FOCUS(330)); if (hasTool('trace')) pickTool('trace'); else pickTool('look'); } },
     { id: 'L6', title: 'Cut a cross-section', when: () => hasTool('section'),
       body: 'Imagine slicing the ground with a knife and looking at the cut edge. That side view is a cross-section. It shows how tall the creek banks are and how deep the soil is above the rock.',
       task: () => 'Pick the Section tool ✂️ and drag a line across Plum Creek, from one bank to the other.',
       stat: () => 'Drag from one side of the creek to the other.',
       cheer: 'That side view is a cross-section. Now you can see how tall the banks are!',
-      go() { pickTool('section'); const c = creekMid(0.5); game.focusOn(c.x, c.y, FOCUS(200)); } }
+      go() { pickTool('section'); const c = creekMid(0.5); lookAt(c.x, c.y, FOCUS(200)); } }
   ];
   const lessons = () => LESSONS.filter((q) => !q.when || q.when());
   const isDone = (q) => !!mem.lessons[q.id];
@@ -439,6 +450,7 @@
   }
   function openLessons(id) {
     if (!panel) return;
+    L.schoolOpened = true;
     const list = lessons(); openId = id || (list.find((q) => !isDone(q)) || list[0] || {}).id || null;
     refreshLessons(); panel.show(); refreshTask();
   }
@@ -469,8 +481,9 @@
       }
     }
     // lessons 2 and 3 look at the lie of the land around the tap
+    // (reading the whole ground costs a moment, so only do it once the player has opened Map school)
     const need2 = lesson('L2'), need3 = lesson('L3');
-    if ((need2 && !isDone(need2)) || (need3 && !isDone(need3))) {
+    if (L.schoolOpened && ((need2 && !isDone(need2)) || (need3 && !isDone(need3)))) {
       const s = sample(p.x, p.y);
       if (s) {
         if (need2 && !isDone(need2)) {
@@ -479,7 +492,8 @@
         }
         if (need3 && !isDone(need3)) {
           let kind = '';
-          if (s.relief >= 1) { if (s.lowFrac <= 0.08) kind = 'valley'; else if (s.highFrac <= 0.08) kind = 'ridge'; }
+          // the creek and gullies are always valleys (a finger is not exact, so 12 m off still counts); other ground by its bowl-or-bump number
+          if (distToStreams(p.x, p.y) <= 12 || s.curv >= 0.6) kind = 'valley'; else if (s.curv <= -0.2 && !s.edge) kind = 'ridge';
           const had = kind === 'valley' ? L.valley : kind === 'ridge' ? L.ridge : false;
           if (kind === 'valley') L.valley = true; else if (kind === 'ridge') L.ridge = true;
           if (L.valley && L.ridge) complete(need3);
@@ -531,8 +545,8 @@
     const cm = Math.round(s.err * 100);
     let text;
     if (cm <= 12) text = 'Nicely level: only ' + cm + ' cm up and down. Water will spread out and soak in.';
-    else if (cm < 25) text = 'Close to level: ' + cm + ' cm up and down. Water will mostly spread out. Stay right on the brown line to do even better.';
-    else text = 'That ditch is ' + cm + ' cm out of level: one end is deep and the other is a dam, so water will run to the low end. Follow a brown contour line next time.';
+    else if (cm < 25) text = 'Close to level: ' + cm + ' cm off. Stay right on the brown line to do even better.';
+    else text = 'This ditch is ' + cm + ' cm out of level, so water will run to its low end. Follow a brown line next time.';
     showCoachToast(text, true);
     L.swale = { len: s.len, err: s.err };
     const q = lesson('L4');
