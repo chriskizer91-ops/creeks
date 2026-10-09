@@ -4,7 +4,7 @@ const vm = require('vm'), fs = require('fs'), path = require('path');
 const root = path.resolve(__dirname, '..');
 const ctx = { console, Math, Float32Array, Float64Array, Map, Set, Object, Array, JSON, Number, String };
 ctx.window = ctx; ctx.globalThis = ctx; vm.createContext(ctx);
-for (const f of ['config', 'world', 'river-core']) vm.runInContext(fs.readFileSync(path.join(root, 'src', f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+for (const f of ['config', 'world', 'river-core', 'river-calib']) vm.runInContext(fs.readFileSync(path.join(root, 'src', f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
 const R = ctx.Creek.River;
 exports.R = R; exports.ctx = ctx;
 if (require.main === module) {

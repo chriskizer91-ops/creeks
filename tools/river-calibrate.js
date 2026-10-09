@@ -5,17 +5,27 @@
 'use strict';
 const { R } = require('./river-test.js');
 const fs = require('fs'), path = require('path');
-const YEARS = +process.argv[2] || 300;
+const YEARS = +process.argv[2] || 600;
 const valley = R.buildValley({ seed: 11 });
 const keyOf = (n) => n.reach.id + ':' + n.reach.nodes.indexOf(n);
 R.CALIB = null;
 const t0 = Date.now();
 const m = new R.Model(valley, { seed: 5, natural: true, params: { bedOnly: true }, noCalib: true });
 const bed0 = new Map(m.nodes.map((n) => [n.id, n.bed]));
+const gravel0 = new Map(m.nodes.map((n) => [n.id, n.tAll]));
+m.nodes.forEach((n) => { n.tAll += 20; });                       // plenty of gravel while the profile settles, so thin layers do not get in the way
+const bins = [[0, 0.15], [0.15, 0.4], [0.4, 1], [1, 2], [2, 5], [5, 30]];
+const natural = (n) => !n.reach.ranch && !n.ranch;
+let prev = new Map(m.nodes.map((n) => [n.id, n.bed]));
 for (let y = 0; y < YEARS; y++) {
   m.stepYear();
-  if ((y + 1) % 50 === 0) { let s = 0, c = 0; m.nodes.forEach((n) => { if (n.A > 2) { s += Math.abs(n.bed - bed0.get(n.id)); c++; } }); console.log('year', y + 1, 'mean |change from start| (over 2 km2):', (s / c).toFixed(2), 'm;', ((Date.now() - t0) / 1000).toFixed(0), 's'); }
+  if ((y + 1) % 100 === 0) {
+    const row = bins.map(([lo, hi]) => { const ns = m.nodes.filter((n) => natural(n) && n.A >= lo && n.A < hi); return lo + '-' + hi + ': ' + (ns.reduce((a, n) => a + n.bed - prev.get(n.id), 0) / ns.length).toFixed(2); });
+    console.log('year', y + 1, 'mean change in the last 100 yr by drained km2 ->', row.join('  '), ';', ((Date.now() - t0) / 1000).toFixed(0), 's');
+    prev = new Map(m.nodes.map((n) => [n.id, n.bed]));
+  }
 }
+m.nodes.forEach((n) => { n.tAll = gravel0.get(n.id); });
 const bed = {}; let big = 0;
 m.nodes.forEach((n) => { const dz = n.bed - bed0.get(n.id); bed[keyOf(n)] = +dz.toFixed(3); if (Math.abs(dz) > 3) big++; });
 fs.writeFileSync(path.join(__dirname, '..', 'src', 'river-calib.js'),

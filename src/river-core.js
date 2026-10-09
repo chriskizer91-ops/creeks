@@ -64,8 +64,8 @@
   /** Soils (banks and soft beds). tauC = shear needed to start eroding (Pa), kd = bank erodibility (m per Pa per s),
       ks = soft-bed erodibility, Hc = how tall a bare bank can stand (m). */
   const SOIL = [
-    { name: 'clay', tauC: 15, kd: 1.5e-7, ks: 2.0e-7, Hc: 1.9 },
-    { name: 'loam', tauC: 6, kd: 4.0e-7, ks: 5.0e-7, Hc: 1.5 }
+    { name: 'clay', tauC: 15, kd: 1.5e-7, ks: 2.0e-8, Hc: 1.9 },
+    { name: 'loam', tauC: 6, kd: 4.0e-7, ks: 5.0e-8, Hc: 1.5 }
   ];
   R.SOIL = SOIL;
   const KR = 3.4e-10, TAU_ROCK = 60;    // limestone abrasion: m per (Pa^1.5 s), and the shear it needs
@@ -119,7 +119,9 @@
       D50: 0.03, soil: 0, veg: 0.3, vegT: 0.3, ledge: 1, struct: null, ranch: false, ranchArc: -1,
       supG: 0, supF: 0, landF: 1, qf: 1, ax: 0, ay: 0, anx: 0, any: 1, sin: 1, kap: 0, belowRanch: false,
       S: 0.004, tau: 0, yMax: 0, tauMax: 0, qgOut: 0, qfOut: 0, stage: 'I', type: 'C', ema: { bed: 0, wid: 0 }, hist: [],
-      acc: null, _S: 0.004
+      acc: null, _S: 0.004, nC: 0.035, nB: 0.06, nF: 0.1, D50nat: 0.03,
+      // working values the flood routine keeps on every node (declared here so all nodes have the same shape, which keeps the model fast)
+      _h: null, _S0: 0.004, _dzEv: 0, _fb: 0, _qgLat: 0, _qfLat: 0, _dz: 0, _cut: 0, _cutSoil: false, _shift: 0, _Din: 0, _landMul: 1, _dug: 0, _slumpMud: 0, supFLateral: 0
     }, o);
   }
   /** Depth of the trench below the floodplain (the bank height), at least a little. */
@@ -156,17 +158,27 @@
       const Wf = Math.max(n.Wv - wt, 4);
       Qf = Math.pow(yo, 5 / 3) * Wf * Math.sqrt(S / Math.max(n.sin, 1)) / nF;
     }
-    const Qc = Math.pow(A, 5 / 3) / Math.pow(P, 2 / 3) * sS / nC;
+    const Qc = A * Math.cbrt(A * A) / Math.cbrt(P * P) * sS / nC;
     const Q = Qc + Qb + Qf;
     if (o) { o.A = A; o.P = P; o.Qc = Qc; o.Qb = Qb; o.Qf = Qf; }
     return Q;
   }
-  /** Water depth for a flow Q: bisection on the (always rising) rating curve. */
+  /** Water depth for a flow Q: the rating curve always rises, so a safeguarded Newton search (bisection when a step would leave the bracket). */
   function solveDepth(n, Q, S) {
-    let lo = 0.003, hi = 1;
-    while (conveyance(n, hi, S) < Q && hi < 80) hi *= 1.6;
-    for (let i = 0; i < 26; i++) { const mid = 0.5 * (lo + hi); if (conveyance(n, mid, S) < Q) lo = mid; else hi = mid; }
-    return 0.5 * (lo + hi);
+    let lo = 0.002, hi = 0;
+    let y = Math.pow(Q * n.nC / (Math.max(n.wb, 0.5) * Math.sqrt(S)), 0.6);        // depth of a wide rectangular channel
+    y = clamp(y, 0.01, 50);
+    for (let it = 0; it < 40; it++) {
+      const f = conveyance(n, y, S) - Q;
+      if (f < 0) lo = y; else hi = y;
+      if (Math.abs(f) < 1e-4 * Q) return y;
+      const dy = Math.max(1e-3 * y, 1e-4), d = (conveyance(n, y + dy, S) - Q - f) / dy;
+      let yn = d > 1e-9 ? y - f / d : (hi ? 0.5 * (lo + hi) : y * 1.6);
+      if (yn <= lo || (hi && yn >= hi) || !(yn > 0)) yn = hi ? 0.5 * (lo + hi) : Math.max(y * 1.6, lo * 2);
+      if (Math.abs(yn - y) < 2e-5) return yn;
+      y = yn;
+    }
+    return y;
   }
   /** Everything about one flow at one node. */
   function hydraulics(n, Q, S) {
@@ -185,7 +197,7 @@
 
   /** Roughness from bed gravel and plants. */
   function setRoughness(n) {
-    n.nC = 0.026 * Math.pow(n.D50 / 0.03, 1 / 6) + 0.02 * n.veg;
+    n.nC = 0.026 * Math.pow(n.D50 / 0.03, 1 / 6) + 0.006 * n.veg;
     n.nB = 0.04 + 0.05 * n.veg;
     n.nF = 0.05 + 0.07 * n.veg;
     return n;
@@ -272,8 +284,10 @@
     reaches.forEach((r) => {
       const ns = r.nodes, K = 12;
       ns.forEach((n, i) => {
+        // a window that is the same on both sides, so the ends of a stream stay where they are
+        const k = Math.min(K, i, ns.length - 1 - i);
         let sx = 0, sy = 0, c = 0;
-        for (let j = Math.max(0, i - K); j <= Math.min(ns.length - 1, i + K); j++) { sx += ns[j].x; sy += ns[j].y; c++; }
+        for (let j = i - k; j <= i + k; j++) { sx += ns[j].x; sy += ns[j].y; c++; }
         n.ax = sx / c; n.ay = sy / c;
       });
       ns.forEach((n, i) => {
@@ -349,7 +363,7 @@
         } else if (dkm < 0) D = lerp(nat.d * 1.15, 2.4, sstep(-3.5, 0, dkm));
         else D = lerp(2.9, Math.max(1.3 * nat.d, 1.2), sstep(1.5, 9.5, dkm));
       } else if (r.ranch) D = 1.7 * sstep(0, 90, n.ranchArc >= 0 ? 90 : (r.nodes.indexOf(n) * DS)) + 0.05;
-      else D = Math.max(1.1 * nat.d, 0.8);
+      else D = Math.max(1.1 * nat.d, 0.35);
       if (!isMain && r.ranch) D = Math.max(0.3, 1.7 * sstep(15, 90, r.nodes.indexOf(n) * DS));
       D = Math.max(D, 0.35);
       n.fp = n.bed + D;
@@ -363,14 +377,14 @@
       n.Wv = Math.max(n.Wv, wtop + 8);
       // bed layers: gravel over soft soil over limestone
       if (isMain && n.ranchArc >= 0) { n.tAll = 0.12; n.tSoil = 0; }
-      else if (isMain) { n.tAll = n.A < 1.5 ? 0.25 : 0.8; n.tSoil = n.A < 1.5 ? 0 : 0.5; }
+      else if (isMain) { n.tAll = 0.25 + 0.55 * sstep(0.8, 2.5, n.A); n.tSoil = 0.5 * sstep(1.0, 3.0, n.A); }
       else if (r.ranch) { n.tAll = 0.1; n.tSoil = 1.2; }
-      else { n.tAll = n.A < 0.6 ? 0.2 : 0.3; n.tSoil = n.A < 0.6 ? 0 : 0.8; }
+      else { n.tAll = 0.2 + 0.1 * sstep(0.3, 1.0, n.A); n.tSoil = 0.8 * sstep(0.4, 1.8, n.A); }       // a smooth change, so there is no step in the bed to start a headcut
       n.D50 = isMain ? (n.ranchArc >= 0 ? 0.035 : s < arcRanchTop ? 0.06 * Math.exp(-0.00009 * (arcRanchTop - s) * 0) : 0.035 * Math.exp(-0.00006 * (s - arcRanchTop))) : 0.04;
       n.D50 = clamp(n.D50, 0.012, 0.09);
       n.soil = isMain ? (n.x < 3000 ? 1 : 0) : r.soil;
       if (r.ranch) n.soil = 0;
-      n.veg = isMain ? (n.ranchArc >= 0 ? 0.25 : s < arcRanchTop ? 0.6 : 0.4) : (r.ranch ? 0.2 : 0.45);
+      n.veg = isMain ? (n.ranchArc >= 0 ? 0.25 : s < arcRanchTop ? 0.7 : 0.4) : (r.ranch ? 0.2 : 0.7);
       n.vegT = n.veg;
       n.landF = 1; n.qf = 1;
       setRoughness(n);
@@ -458,9 +472,9 @@
       climate: 1,            // wetter (above 1) or drier (below 1) floods
       ranchRed: 0,           // how much the ranch's work lowers peak flows (0..0.3)
       neighborRed: 0,        // how much upstream neighbours' work lowers flows and mud (0..0.3)
-      gravelScale: 1, fineScale: 1, kMig: 1, kBank: 1, grazing: 0, bedOnly: false
+      gravelScale: 1, fineScale: 1, kMig: 2.5, kBank: 1, grazing: 0, bedOnly: false
     }, opts.params || {});
-    if (opts.natural) this.nodes.forEach((n) => { const nat = R.natural(n.A); if (trench(n) > 1.5 * nat.d) { n.wb = 0.7 * nat.w; n.m = 1.5; n.fp = n.bed + nat.d; n.bw = 0; n.bz = -1e9; n.veg = 0.6; n.vegT = 0.6; n.Wv = Math.max(n.Wv, topWidth(n) + 10); } });
+    if (opts.natural) this.nodes.forEach((n) => { const nat = R.natural(n.A); if (trench(n) > 1.5 * nat.d) { n.wb = 0.7 * nat.w; n.m = 1.5; n.fp = n.bed + nat.d; n.bw = 0; n.bz = -1e9; n.veg = 0.7; n.vegT = 0.7; n.Wv = Math.max(n.Wv, topWidth(n) + 10); } });
     this._initDerived();
     if (opts.d50) this.nodes.forEach((n) => { if (opts.d50[n.id] != null) n.D50 = opts.d50[n.id]; });
     this.calibrateSupply(opts.d50 ? true : false);
@@ -496,7 +510,7 @@
     this.nodes.forEach((n) => { n.qf = clamp(1 - nr - (n.belowRanch ? rr * Ar / Math.max(n.A, Ar) : 0), 0.5, 1.4); n._landMul = n.landF * (1 - 0.6 * nr); });
   };
   /** Bed slope of each node, smoothed over about five nodes so tiny steps do not make wild shear. */
-  P._slopes = function () {
+  P._slopes = function (quick) {
     this.reaches.forEach((r) => {
       const ns = r.nodes, raw = ns.map((n) => (n.down ? (n.bed - n.down.bed) / Math.max(n.len, 5) : 0));
       ns.forEach((n, i) => {
@@ -510,7 +524,7 @@
       });
     });
     if (this.outlet.down === null && this.outlet._S < 3e-4 && this.outlet.ups[0]) this.outlet._S = Math.max(this.outlet.ups[0]._S, 3e-4);
-    this._sinuosity();
+    if (!quick) this._sinuosity();
   };
   P._sinuosity = function () {
     this.reaches.forEach((r) => {
@@ -572,7 +586,7 @@
     });
     this.order.forEach((n) => {
       const nat = R.natural(n.A), incised = trench(n) > 1.5 * nat.d;
-      const g = incised ? setRoughness({ wb: 0.7 * nat.w, m: 1.5, fp: n.bed + nat.d, bed: n.bed, bw: 0, bz: -1e9, Wv: n.Wv, D50: 0.03, veg: 0.6, sin: Math.max(n.sin, 1.1) }) : n;
+      const g = incised ? setRoughness({ wb: 0.7 * nat.w, m: 1.5, fp: n.bed + nat.d, bed: n.bed, bw: 0, bz: -1e9, Wv: n.Wv, D50: 0.03, veg: 0.7, sin: Math.max(n.sin, 1.1) }) : n;
       const taus = refTaus(g, n.A, n._S), wb = incised ? 0.7 * nat.w : n.wb, L = load.get(n);
       let lo = 0.006, hi = n.A < 1.5 ? 0.3 : 0.15;
       for (let i = 0; i < 24; i++) { const mid = Math.sqrt(lo * hi); if (capYear(taus, wb, mid) > L) lo = mid; else hi = mid; }
@@ -630,32 +644,35 @@
     return out;
   };
 
+  /** One flood (or low-flow spell). First every node's flow, depth, shear and bank erosion are worked out (they do not depend on
+      the small bed changes during the flood); then the gravel is routed in several short steps, so a scour pit or a bump can
+      feed back on the slope before it runs away; then the mud is routed down the system and settles on floodplains. */
   P._runEvent = function (e, rep) {
-    const durS = e.durH * HOUR, order = this.order;
+    const durS = e.durH * HOUR, order = this.order, bedOnly = this.p.bedOnly;
+    const landGlobal = this.p.landGlobal || 1;
+    // ---- A. flow, shear and banks
     for (let oi = 0; oi < order.length; oi++) {
       const n = order[oi], a = n.acc;
-      let qgIn = 0, qfIn = 0;
-      for (let u = 0; u < n.ups.length; u++) { qgIn += n.ups[u].qgOut; qfIn += n.ups[u].qfOut; }
       const Q = e.k * Math.pow(n.A, 0.8) * n.qf;
-      const S = n._S;
-      const h = hydraulics(n, Q, S);
+      const h = hydraulics(n, Q, n._S);
+      n._h = h; n._S0 = Math.max(n._S, 1e-5); n._dzEv = 0; n._fb = 0;
       if (n === this.ranchExit && Q > rep.peakRanch) { rep.peakRanch = Q; rep.peakT = e.T; }
       if (h.tau > a.tauMax) a.tauMax = h.tau;
       if (h.y > a.yMax) a.yMax = h.y;
       if (h.share > 0.02) a.over += e.durH;
       n.tau = h.tau;
-      // ---- side supply, shared out over the year's floods by their work
-      const land = n._landMul * (this.p.landGlobal || 1);
-      qgIn += n.supG * land * this.p.gravelScale * e.w / durS;
-      qfIn += n.supF * land * this.p.fineScale * e.w / durS;
-
+      const land = n._landMul * landGlobal;
+      let qgLat = n.supG * land * this.p.gravelScale * e.w / durS;
+      let qfLat = n.supF * land * this.p.fineScale * e.w / durS;
       // ---- banks
       const Ht = trench(n), Hz = benchDepth(n), sc = SOIL[n.soil];
-      const tauC = sc.tauC * (1 + 4 * n.veg);
+      // a bank holds until the shear passes what its soil and roots can take; where the foot of the bank is lined with the
+      // stream's own gravel, that gravel armours it as long as the gravel itself holds still
+      const tauC = Math.max(sc.tauC * (1 + 4 * n.veg), 0.9 * 728 * n.D50);
       const curv = Math.min(Math.abs(n.kap) * topWidth(n), 1.2);
       const wallWet = h.y > Hz + 0.05;
       let Eo = 0, Ei = 0;
-      if (wallWet && h.tau > 0 && !this.p.bedOnly) {
+      if (wallWet && h.tau > 0 && !bedOnly) {
         const tauNB = 0.8 * h.tau;
         const kd = sc.kd * this.p.kBank * (1 + 0.8 * this.p.grazing * (1 - n.veg));
         Eo = Math.min(kd * Math.max(0, tauNB * (1 + 1.6 * curv) - tauC) * durS, 0.6);
@@ -663,46 +680,71 @@
       }
       a.Eo += Eo; a.Ei += Ei;
       const wallH = Math.max(Ht - Hz, 0.1), bankVol = (Eo + Ei) * wallH * n.len * (1 - POR);
-      qfIn += 0.88 * bankVol / durS; qgIn += 0.12 * bankVol / durS;
+      qfLat += 0.88 * bankVol / durS; qgLat += 0.12 * bankVol / durS;
       rep.bankErosion += bankVol / (1 - POR);
-
-      // ---- bedload: it moves toward the carrying capacity over an adaptation length
-      const th = h.tau / (SREL * RHO * G * n.D50);
-      const qb = th > 0.045 ? 8 * Math.pow(th - 0.045, 1.5) * Math.sqrt(SREL * G * Math.pow(n.D50, 3)) : 0;
-      const cap = qb * Math.max(n.wb, 1);
-      const f = 1 - Math.exp(-n.len / Math.max(200, 20 * n.wb));      // gravel adapts to the flow over a few hundred metres
-      let qgOut = cap * f + qgIn * (1 - f);
-      const st = n.struct;
-      let trapped = 0;
-      if (st && st.type === 'pond') {
-        const eff = 0.9 * Math.max(0, 1 - st.fill / st.cap);
-        trapped = qgIn * eff; qgOut = qgIn - trapped; st.fill += trapped * durS; rep.trapped += trapped * durS;
-      }
-      const lock = st && (st.type === 'weir' || st.type === 'bda' || st.type === 'plug');
-      const area = (1 - POR) * Math.max(n.wb, 1) * n.len;
-      let dz = (qgIn - qgOut) * durS / area;
-      if (dz < 0) {
-        if (lock) { dz = 0; qgOut = qgIn; }
-        else if (-dz > n.tAll) { dz = -n.tAll; qgOut = qgIn + n.tAll * area / durS; }
-      }
-      dz = clamp(dz, -Math.max(0.05, 2.5 * n.D50), 0.3);      // only a thin active layer of gravel moves in one flood
-      qgOut = Math.max(qgIn - dz * area / durS, 0);
-      n.bed += dz; n.tAll = Math.max(n.tAll + dz, 0); a.bed += dz; rep.bedChange += dz * area;
-      a.qs += qgOut * durS;
-      // ---- no gravel left to move and the water still has spare strength: cut the soft soil, then the limestone
-      let fromBed = 0;
-      if (n.tAll < 0.03 && cap > qgIn && !lock) {
-        if (n.tSoil > 0.001) {
-          const ex = Math.max(0, h.tau - sc.tauC * 0.8);
-          const Es = Math.min(sc.ks * ex * durS, n.tSoil, 0.3);
-          n.tSoil -= Es; n.bed -= Es; a.bed -= Es; fromBed = Es * Math.max(n.wb, 1) * n.len * (1 - POR); rep.bedErosion += fromBed / (1 - POR);
-        } else {
-          const Er = Math.min(KR * n.ledge * Math.pow(Math.max(0, h.tau - TAU_ROCK), 1.5) * durS, 0.05);
-          n.bed -= Er; a.bed -= Er; fromBed = Er * Math.max(n.wb, 1) * n.len * (1 - POR); rep.bedErosion += fromBed / (1 - POR);
+      n._qgLat = qgLat; n._qfLat = qfLat;
+    }
+    // ---- B. gravel, in short steps
+    const nsub = clamp(Math.ceil(e.durH / 1.5), 2, 8), dts = durS / nsub;
+    for (let s = 0; s < nsub; s++) {
+      if (s > 0) this._slopes(true);
+      for (let oi = 0; oi < order.length; oi++) {
+        const n = order[oi], a = n.acc, h = n._h, sc = SOIL[n.soil];
+        let qgIn = n._qgLat;
+        for (let u = 0; u < n.ups.length; u++) qgIn += n.ups[u].qgOut;
+        const tau = h.tau * Math.pow(Math.max(n._S, 1e-5) / n._S0, 0.8);
+        const th = tau / (SREL * RHO * G * n.D50);
+        const qb = th > 0.045 ? 8 * Math.pow(th - 0.045, 1.5) * Math.sqrt(SREL * G * Math.pow(n.D50, 3)) : 0;
+        const cap = qb * Math.max(n.wb, 1);
+        const f = 1 - Math.exp(-n.len / Math.max(200, 20 * n.wb));      // gravel adapts to the flow over a few hundred metres
+        let qgOut = cap * f + qgIn * (1 - f);
+        const st = n.struct;
+        if (st && st.type === 'pond') {
+          const eff = 0.9 * Math.max(0, 1 - st.fill / st.cap);
+          const trapped = qgIn * eff; qgOut = qgIn - trapped; st.fill += trapped * dts; rep.trapped += trapped * dts;
         }
-        qfIn += 0.8 * fromBed / durS; qgOut += 0.2 * fromBed / durS;
+        const lock = st && (st.type === 'weir' || st.type === 'bda' || st.type === 'plug');
+        const area = (1 - POR) * Math.max(n.wb, 1) * n.len;
+        let dz = (qgIn - qgOut) * dts / area;
+        if (dz < 0) {
+          if (lock) { dz = 0; qgOut = qgIn; }
+          else if (-dz > n.tAll) { dz = -n.tAll; qgOut = qgIn + n.tAll * area / dts; }
+        }
+        // only a thin active layer of gravel moves in one flood
+        dz = clamp(dz, -Math.max(0, Math.max(0.04, 1.2 * n.D50) + n._dzEv), Math.max(0, 0.3 - n._dzEv));
+        qgOut = Math.max(qgIn - dz * area / dts, 0);
+        n._dz = dz;
+        // ---- no gravel left to move and the water still has spare strength: cut the soft soil, then the limestone
+        n._cut = 0;
+        if (n.tAll + dz < 0.03 && cap > qgIn && !lock && !bedOnly) {
+          if (n.tSoil > 0.001) {
+            const ex = Math.max(0, tau - sc.tauC * 0.8);
+            n._cut = Math.min(sc.ks * ex * dts, n.tSoil, 0.3 / nsub); n._cutSoil = true;
+          } else {
+            n._cut = Math.min(KR * n.ledge * Math.pow(Math.max(0, tau - TAU_ROCK), 1.5) * dts, 0.05 / nsub); n._cutSoil = false;
+          }
+          qgOut += 0.2 * n._cut * area / dts;
+        }
+        n.qgOut = qgOut;
+        a.qs += qgOut * dts;
+        if (n === this.outlet) rep.exportGravel += qgOut * dts;
       }
-      // ---- fines: carried through, and left on the floodplain when the water goes overbank
+      // the bed changes for the whole stream at once, then the next step sees the new slopes
+      for (let oi = 0; oi < order.length; oi++) {
+        const n = order[oi], a = n.acc, area = (1 - POR) * Math.max(n.wb, 1) * n.len;
+        n.bed += n._dz; n.tAll = Math.max(n.tAll + n._dz, 0); a.bed += n._dz; n._dzEv += n._dz; rep.bedChange += n._dz * area;
+        if (n._cut > 0) {
+          n.bed -= n._cut; a.bed -= n._cut;
+          if (n._cutSoil) n.tSoil -= n._cut;
+          const vol = n._cut * area; n._fb += vol; rep.bedErosion += vol / (1 - POR);
+        }
+      }
+    }
+    // ---- C. mud: carried through, and left on the floodplain when the water goes overbank
+    for (let oi = 0; oi < order.length; oi++) {
+      const n = order[oi], a = n.acc, h = n._h, st = n.struct;
+      let qfIn = n._qfLat + 0.8 * n._fb / durS;
+      for (let u = 0; u < n.ups.length; u++) qfIn += n.ups[u].qfOut;
       let eps = 0;
       if (h.share > 0.01) eps = clamp(0.25 * h.share, 0, 0.3);
       const dep = eps * qfIn * durS;
@@ -712,9 +754,8 @@
       }
       let qfOut = qfIn - dep / durS;
       if (st && st.type === 'pond') { const t2 = 0.5 * qfOut * Math.max(0, 1 - st.fill / st.cap); qfOut -= t2; st.fill += t2 * durS; rep.trapped += t2 * durS; }
-      n.qgOut = qgOut; n.qfOut = Math.max(qfOut, 0);
-      if (n === this.outlet) { rep.exportGravel += n.qgOut * durS; rep.exportFines += n.qfOut * durS; }
-      a.qs = Math.max(a.qs, 0);
+      n.qfOut = Math.max(qfOut, 0);
+      if (n === this.outlet) rep.exportFines += n.qfOut * durS;
     }
   };
 
@@ -755,6 +796,8 @@
       n._shift = shift * p.kMig; n._Din = Din;
       // point bars take gravel from the bed (a little lowering) when they grow
       if (Din > 0 && n.tAll > 0.05) { const lower = Math.min(0.5 * n.tAll, Din * 0.7 * Math.max(Ht, 0.5) / Math.max(n.wb, 4)); n.bed -= lower; n.tAll -= lower; }
+      // plants creep out over the bars of a creek that is not cut down and is quiet: it narrows back toward its natural width
+      if (!(Ht > 1.5 * R.natural(n.A).d) && Eo + Ei < 0.04 && n.bw < 0.05) { const wn = R.natural(n.A, n.qf).w; dW -= clamp(0.04 * (topWidth(n) - 1.05 * wn) * n.veg, 0, 0.4); }
       dW = clamp(dW, -0.5, 3);
       if (n.bw > 0.05 && Hz > 0) n.bw = Math.max(0, n.bw + dW); else n.wb = Math.max(0.3 * R.natural(n.A).w, n.wb + dW);
       a.dW = dW;
@@ -800,32 +843,50 @@
   };
 
   // ---- planform: bends move, loops pinch off, the node spacing is kept even ---------------------------
+  /** Bends migrate. The push on the outer bank comes from the curvature of the bend and of the stretch just upstream of it
+      (the water arrives still leaning toward last bend's outside), so bends grow and slide downstream, and loops end up
+      pinched off. The rate is about 5% of a channel width a year at the most active bend, less where the banks are stiff,
+      planted, held by rock or by a structure, and more when the floods are strong. The soil that goes from one bank is laid
+      on the other, so this moves the channel without making or losing sediment. */
   P._migrate = function (rep) {
+    const kM = this.p.kMig;
     this.reaches.forEach((r) => {
-      const ns = r.nodes, N = ns.length; if (N < 5) return;
-      const sh = ns.map((n) => n._shift || 0), sm = sh.slice();
-      for (let pass = 0; pass < 2; pass++) for (let i = 1; i < N - 1; i++) sm[i] = 0.25 * sh[i - 1] + 0.5 * sh[i] + 0.25 * sh[i + 1];
+      const ns = r.nodes, N = ns.length; if (N < 6 || r.ranch) return;
+      const keff = new Array(N).fill(0); let acc = 0;
+      for (let i = 0; i < N; i++) {
+        const n = ns[i], W = Math.max(topWidth(n), 4), ds = i > 0 ? ns[i - 1].len : 0, dec = Math.exp(-ds / (5 * W));
+        acc = i === 0 ? n.kap : dec * acc + (1 - dec) * n.kap;
+        keff[i] = 0.35 * n.kap + 0.65 * acc;
+      }
+      const rate = new Array(N).fill(0);
+      for (let i = 1; i < N - 1; i++) {
+        const n = ns[i]; if (n.ups.length > 1 || n.ups.some((u) => u.reach !== r) || n.ranchArc >= 0) continue;       // junctions and the real ranch course stay put
+        const W = Math.max(topWidth(n), 4), x = Math.min(Math.abs(keff[i]) * W, 1.5);
+        const g = Math.min(x / 0.25, 1) * (1 - 0.5 * sstep(0.25, 1.2, x));
+        const psi = clamp((n.acc ? n.acc.tauMax : 0) / (1.2 * 728 * n.D50), 0.2, 1.5);
+        const hold = (n.soil === 1 ? 0.7 : 1) * (1 - 0.5 * n.veg) * (n.ledge < 0.5 ? 0.15 : 1) * (n.struct ? 0.2 : 1);
+        rate[i] = Math.sign(keff[i]) * Math.min(kM * 0.05 * W * g * psi * hold, 0.15 * W);
+      }
+      const sm = rate.slice();
+      for (let pass = 0; pass < 2; pass++) for (let i = 1; i < N - 1; i++) sm[i] = 0.25 * rate[i - 1] + 0.5 * rate[i] + 0.25 * rate[i + 1];
       const dx = new Array(N).fill(0), dy = new Array(N).fill(0);
       for (let i = 1; i < N - 1; i++) {
-        const n = ns[i]; if (n.ups.length > 1 || n.ups.some((u) => u.reach !== r)) continue;       // junctions stay put
         const a = ns[i - 1], c = ns[i + 1], tx = c.x - a.x, ty = c.y - a.y, l = Math.hypot(tx, ty) || 1;
-        const nLx = -ty / l, nLy = tx / l, sgn = n.kap > 0 ? 1 : -1;
-        let s = Math.min(sm[i], 0.15 * Math.max(topWidth(n), 8));
-        // slowed where the bank is a stiff bedrock wall or planted
-        dx[i] = -sgn * nLx * s; dy[i] = -sgn * nLy * s;
+        dx[i] = (ty / l) * sm[i]; dy[i] = (-tx / l) * sm[i];           // toward the outside of the bend (the right-hand side when the bend turns left)
       }
       for (let i = 1; i < N - 1; i++) {
         const n = ns[i];
+        if (n.ranchArc >= 0 || n.ups.length > 1) continue;
         n.x += dx[i]; n.y += dy[i];
         // stay on the valley floor
         const off = (n.x - n.ax) * n.anx + (n.y - n.ay) * n.any, lim = Math.max(0.5 * n.Wv - 0.5 * topWidth(n) - 4, 6);
         if (Math.abs(off) > lim) { const k = (Math.abs(off) - lim) * Math.sign(off); n.x -= k * n.anx; n.y -= k * n.any; }
       }
-      // a light smoothing takes out the saw-tooth
+      // a very light smoothing takes out any saw-tooth
       const px = ns.map((n) => n.x), py = ns.map((n) => n.y);
       for (let i = 1; i < N - 1; i++) {
-        const n = ns[i]; if (n.ups.length > 1) continue;
-        n.x += 0.03 * ((px[i - 1] + px[i + 1]) / 2 - px[i]); n.y += 0.03 * ((py[i - 1] + py[i + 1]) / 2 - py[i]);
+        const n = ns[i]; if (n.ups.length > 1 || n.ranchArc >= 0) continue;
+        n.x += 0.004 * ((px[i - 1] + px[i + 1]) / 2 - px[i]); n.y += 0.004 * ((py[i - 1] + py[i + 1]) / 2 - py[i]);
       }
     });
     this.nodes.forEach((n) => { n.len = n.down ? Math.hypot(n.down.x - n.x, n.down.y - n.y) : n.len; });
@@ -888,7 +949,7 @@
   // ---- classification --------------------------------------------------------------------------------
   P.classify = function (n) {
     const nat = R.natural(n.A, n.qf), Ht = trench(n), Hz = benchDepth(n);
-    const incised = Ht > 1.5 * nat.d;
+    const incised = Ht > Math.max(1.5 * nat.d, nat.d + 0.5);
     const Hbf = Hz > 0.1 ? Hz : Ht, wbf = Math.max(widthAt(n, Hbf), 1), fpw = widthAt(n, Math.min(2 * Hbf, Ht * 1.001 + (2 * Hbf > Ht ? 0.01 : 0)));
     const fpw2 = 2 * Hbf > Ht ? Math.max(n.Wv, topWidth(n)) : widthAt(n, 2 * Hbf);
     const ER = fpw2 / wbf, WD = wbf / Math.max(Hbf, 0.1);
@@ -899,12 +960,12 @@
     else type = (n.sin > 1.5 && WD < 12) ? 'E' : 'C';
     const benchOK = n.bw > 0.8 * n.wb && Hz > 0.5 * nat.d;
     let stage;
-    if (benchOK && Math.abs(n.ema.bed) < 0.02 && Math.abs(n.ema.wid) < 0.15 && n.veg > 0.45) stage = 'V';
-    else if (n.ema.bed > 0.015 || (n.bw > 0.3 * n.wb && incised)) stage = 'IV';
-    else if (n.ema.wid > 0.12 && incised) stage = 'III';
-    else if (n.ema.bed < -0.02 || (incised && n.tAll < 0.05 && n.ema.wid <= 0.12 && Ht > 1.8 * nat.d)) stage = 'II';
-    else if (incised) stage = 'III';
-    else stage = 'I';
+    if (!incised) stage = n.ema.bed < -0.06 ? 'II' : 'I';                   // a creek that is not cut down is steady unless its bed is dropping fast
+    else if (benchOK && Math.abs(n.ema.bed) < 0.02 && Math.abs(n.ema.wid) < 0.15 && n.veg > 0.45) stage = 'V';
+    else if (n.ema.bed > 0.015 || n.bw > 0.3 * n.wb) stage = 'IV';
+    else if (n.ema.wid > 0.12) stage = 'III';
+    else if (n.ema.bed < -0.02 || (n.tAll < 0.05 && Ht > 1.8 * nat.d)) stage = 'II';
+    else stage = 'III';
     return { stage, type, ER, WD, Ht, Hnat: nat.d, incision: Ht / nat.d, wnat: nat.w };
   };
 
