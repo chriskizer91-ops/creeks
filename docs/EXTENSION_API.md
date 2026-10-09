@@ -394,6 +394,7 @@ So modules can use each other **optionally**: always feature-detect, never requi
 - `Creek.audio`: audio
 - `Creek.life = {score(), check(), postcards()}` and `Creek.neighbors = {state(), factor()}`: life
 - `Creek.coach`: coach
+- `Creek.river = {open, close, isOpen, model, run, select, setLens, setTool, applyToRanch, ...}` and the game event `"river"` (`true`/`false`): river (the valley view, see [RIVER_SCALE.md](RIVER_SCALE.md)); the module is on by default and its scripts `src/river-core.js` and `src/river-calib.js` are plain `<script>` tags in `index.html`
 
 Example: `if (Creek.view3d && Creek.view3d.isActive()) { ... }`; `if (game.lenses.some(l => l.id === 'flow')) { ... }`.
 

@@ -121,7 +121,7 @@
       S: 0.004, tau: 0, yMax: 0, tauMax: 0, qgOut: 0, qfOut: 0, stage: 'I', type: 'C', ema: { bed: 0, wid: 0 }, hist: [],
       acc: null, _S: 0.004, nC: 0.035, nB: 0.06, nF: 0.1, D50nat: 0.03,
       // working values the flood routine keeps on every node (declared here so all nodes have the same shape, which keeps the model fast)
-      _h: null, _S0: 0.004, _dzEv: 0, _fb: 0, _qgLat: 0, _qfLat: 0, _dz: 0, _cut: 0, _cutSoil: false, _shift: 0, _Din: 0, _landMul: 1, _dug: 0, _slumpMud: 0, supFLateral: 0
+      _h: null, _S0: 0.004, _dzEv: 0, _fb: 0, _qgLat: 0, _qfLat: 0, _dz: 0, _cut: 0, _cutSoil: false, _shift: 0, _Din: 0, _landMul: 1, _dug: 0, _slumpMud: 0, supFLateral: 0, tau10: 0, _Sw: 0.004
     }, o);
   }
   /** Depth of the trench below the floodplain (the bank height), at least a little. */
@@ -408,22 +408,23 @@
   // simply "the lowest of the valley floors the nodes make, plus a rise away from them".
   R.buildDem = function (valley, cell) {
     cell = cell || 40;
-    const W = GEO.W, H = GEO.H, nx = Math.ceil(W / cell), ny = Math.ceil(H / cell), z = new Float32Array(nx * ny);
+    const W = GEO.W, H = GEO.H, nx = Math.ceil(W / cell), ny = Math.ceil(H / cell), z = new Float32Array(nx * ny), floor = new Float32Array(nx * ny);
     const per = valley.reaches.map((r) => r.nodes.filter((n, i) => i % 3 === 0 || i === r.nodes.length - 1));
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
       const x = (i + 0.5) * cell, y = (j + 0.5) * cell;
-      let best = 1e9;
+      let best = 1e9, bf = 0;
       for (let r = 0; r < per.length; r++) {
         const ns = per[r]; let bd = 1e18, bn = null;
         for (let k = 0; k < ns.length; k++) { const n = ns[k], d = (n.x - x) ** 2 + (n.y - y) ** 2; if (d < bd) { bd = d; bn = n; } }
         const d = Math.sqrt(bd), half = 0.5 * bn.Wv;
         const rise = d > half ? 42 * (1 - Math.exp(-(d - half) / 420)) : 0;
         const v = bn.fp + rise + (d > half ? 0.0015 * (d - half) : 0);
-        if (v < best) best = v;
+        if (v < best) { best = v; bf = d <= half ? 1 : Math.max(0, 1 - (d - half) / 70); }
       }
       z[j * nx + i] = best + 2.0 * (Math.sin(x / 310) * Math.cos(y / 270)) * (best > 0 ? 1 : 0);
+      floor[j * nx + i] = bf;
     }
-    return { nx, ny, cell, z };
+    return { nx, ny, cell, z, floor };
   };
 
   // ------------------------------------------------------------------------------------------------
@@ -520,7 +521,7 @@
         // the slope just downstream of this node (so a bump raises its own slope and the flow wears it down: that keeps the bed
         // from forming a saw-tooth), but not wilder than 2.5x the wider slope
         const loc = raw[i];
-        n._S = clamp(Number.isFinite(loc) ? loc : wide, 0.4 * wide, 2.5 * wide);
+        n._S = clamp(Number.isFinite(loc) ? loc : wide, 0.4 * wide, 2.5 * wide); n._Sw = wide;
       });
     });
     if (this.outlet.down === null && this.outlet._S < 3e-4 && this.outlet.ups[0]) this.outlet._S = Math.max(this.outlet.ups[0]._S, 3e-4);
@@ -661,7 +662,7 @@
       if (h.y > a.yMax) a.yMax = h.y;
       if (h.share > 0.02) a.over += e.durH;
       n.tau = h.tau;
-      const land = n._landMul * landGlobal;
+      const land = n._landMul * landGlobal * Math.pow(this.p.climate, 1.5);
       let qgLat = n.supG * land * this.p.gravelScale * e.w / durS;
       let qfLat = n.supF * land * this.p.fineScale * e.w / durS;
       // ---- banks
@@ -803,6 +804,11 @@
       a.dW = dW;
       // ---- floodplain growth (mud settling on the valley floor)
       n.fp += a.fp;
+      // ---- plants on a quiet, cut-down creek trap mud along its edges and start a bench (a "vegetated bar"), so planting heals the creek even when the banks never slump
+      if (Ht > Math.max(1.2 * R.natural(n.A).d, R.natural(n.A).d + 0.35) && n.veg > 0.45 && Eo + Ei < 0.05 && !fail && Ht > 0.9) {
+        const Hb = clamp(0.3 * Ht, 0.35, 0.9);
+        if (n.bw < 0.05) { n.bz = n.bed + Hb; n.bw = 0.5; } else n.bw = Math.min(n.bw + 0.4 * (n.veg - 0.3), 3 * Math.max(n.wb, 4));
+      }
       // ---- bench growth: mud settles on a bench inside the trench and it builds up toward the natural bankfull height
       if (n.bw > 0.05) {
         const nat = R.natural(n.A, n.qf), Hzn = benchDepth(n);
@@ -827,7 +833,7 @@
     this.nodes.forEach((n) => {
       const st = n.struct; if (!st) return;
       st.age = (st.age || 0) + 1;
-      const big = n.acc.tauMax;
+      const big = n.acc.tauMax * Math.min(1, n._Sw / Math.max(n._S, 1e-6));        // the step a weir makes steepens its own slope; judge it by the stream's slope
       if (st.type === 'bda' && st.age > st.life) { n.struct = null; rep.notes.push('A beaver dam analog wore out.'); }
       else if ((st.type === 'bda' || st.type === 'weir') && big > st.design) { st.health = (st.health || 1) - 0.5; if (st.health <= 0) { n.struct = null; rep.notes.push('A flood washed out a ' + (st.type === 'bda' ? 'beaver dam analog' : 'rock weir') + '.'); } }
     });
@@ -992,7 +998,7 @@
   P.pathDown = function (node) { const out = []; for (let n = node; n; n = n.down) out.push(n); return out; };
   P.snapshotProfile = function () {
     const out = new Map();
-    this.nodes.forEach((n) => { out.set(n.id, { bed: n.bed, fp: n.fp, wb: n.wb, w: topWidth(n), x: n.x, y: n.y, bw: n.bw }); });
+    this.nodes.forEach((n) => { out.set(n.id, { bed: n.bed, fp: n.fp, wb: n.wb, w: topWidth(n), x: n.x, y: n.y, bw: n.bw, bz: n.bz, m: n.m, Wv: n.Wv, veg: n.veg }); });
     return out;
   };
   /** Nearest node to a point on the valley map (within `max` metres), or null. */
@@ -1014,8 +1020,9 @@
     opts = opts || {};
     if (!node || node.struct) return false;
     const nat = R.natural(node.A);
-    if (type === 'weir') node.struct = { type, crest: node.bed + (opts.height || 0.8), height: opts.height || 0.8, design: 140, health: 1, age: 0 };
-    else if (type === 'bda') node.struct = { type, crest: node.bed + (opts.height || 0.5), height: opts.height || 0.5, design: 60, health: 1, age: 0, life: 10 };
+    const tauT = (T) => hydraulics(node, kOfT(T) * Math.pow(node.A, 0.8) * node.qf, node._S).tau;
+    if (type === 'weir') node.struct = { type, crest: node.bed + (opts.height || 0.8), height: opts.height || 0.8, design: 1.15 * tauT(50), health: 1, age: 0 };           // a rock weir is built to take about a 50-year flood
+    else if (type === 'bda') node.struct = { type, crest: node.bed + (opts.height || 0.5), height: opts.height || 0.5, design: 1.1 * tauT(5), health: 1, age: 0, life: 10 };   // posts and brush: a 5-year flood washes them out
     else if (type === 'plug') node.struct = { type, crest: node.bed, height: 0, design: 1e9, health: 1, age: 0 };
     else if (type === 'pond') node.struct = { type, crest: node.bed, height: 0, design: 1e9, health: 1, age: 0, fill: 0, cap: opts.capacity || (node.wb * 120 * 2) };
     else return false;
@@ -1038,34 +1045,100 @@
   };
   /** Plant a streamside buffer: the riparian roots grow over the next years. */
   P.plant = function (nodes, target) { nodes.forEach((n) => { n.vegT = Math.max(n.vegT, target == null ? 1 : target); }); };
-  /** Put bends back: lengthen the channel into a sine curve about the valley axis. Returns metres of channel gained. */
-  P.reMeander = function (nodes, sinTarget) {
-    sinTarget = sinTarget || 1.35;
-    if (nodes.length < 8) return 0;
-    const nat = R.natural(nodes[Math.floor(nodes.length / 2)].A), lam = 11 * nat.w, amp = clamp(Math.sqrt(Math.max(sinTarget * sinTarget - 1, 0.01)) * lam / (2 * Math.PI) * 0.9, 4, 0.5 * nodes[0].Wv - 8);
-    let gained = 0; const s0 = nodes.map((n) => n.len);
-    let s = 0;
-    nodes.forEach((n, i) => {
-      const w = sstep(0, 5, i) * sstep(0, 5, nodes.length - 1 - i);
-      const off = amp * w * Math.sin(2 * Math.PI * s / lam);
-      n.x = n.ax + n.anx * off + (n.x - n.ax - n.anx * ((n.x - n.ax) * n.anx + (n.y - n.ay) * n.any)) * 0;
-      n.y = n.ay + n.any * off;
-      s += s0[i];
-    });
-    nodes.forEach((n) => { n.len = n.down ? Math.hypot(n.down.x - n.x, n.down.y - n.y) : n.len; });
-    gained = nodes.reduce((a, n, i) => a + n.len - s0[i], 0);
-    this._slopes(); return gained;
+  /** Can the player re-shape this stretch? The ranch's own creek and gullies are drawn on the ranch map, so they are changed there. */
+  P.canReshape = function (nodes) {
+    return nodes.length >= 8 && !nodes.some((n, i) => n.ranchArc >= 0 || n.reach.ranch || n.struct || (i > 0 && i < nodes.length - 1 && n.ups.length > 1));
   };
-  /** Straighten a stretch (what engineers once did to creeks). A sandbox "what if". */
+  /** The longest clear stretch of the same stream around a node (no side stream joining inside it), at most `k` nodes each way. */
+  P.clearStretch = function (node, k) {
+    const ns = node.reach.nodes, i = ns.indexOf(node); let a = i, b = i;
+    while (a > 0 && i - a < k && !(ns[a].ups.length > 1 && a !== i)) a--;
+    while (b < ns.length - 1 && b - i < k && !(ns[b].ups.length > 1)) b++;
+    return ns.slice(a, b + 1);
+  };
+  const pathLen = (pts) => { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; };
+  /** Put bends back: lay the channel in a sine curve about the straight line between the ends of the stretch (ends stay put).
+      Returns metres of channel gained (0 if the stretch cannot be changed). */
+  P.reMeander = function (nodes, sinTarget) {
+    sinTarget = clamp(sinTarget || 1.4, 1.05, 2);
+    if (!this.canReshape(nodes)) return 0;
+    const N = nodes.length, a = nodes[0], b = nodes[N - 1], cx = b.x - a.x, cy = b.y - a.y, chord = Math.hypot(cx, cy);
+    if (chord < 200) return 0;
+    const ux = cx / chord, uy = cy / chord, vx = -uy, vy = ux;
+    const mid = nodes[N >> 1], nat = R.natural(mid.A), lam = clamp(11 * nat.w, 120, chord / 1.5);
+    const s0 = nodes.map((n, i) => (i < N - 1 ? n.len : 0)); let s = 0; const arc = s0.map((l) => { const v = s; s += l; return v; });
+    const L0 = s;
+    const build = (amp) => nodes.map((n, i) => {
+      const t = arc[i] / L0, w = sstep(0, 0.1, t) * sstep(0, 0.1, 1 - t), off = amp * w * Math.sin(2 * Math.PI * t * chord / lam);
+      return [a.x + ux * chord * t + vx * off, a.y + uy * chord * t + vy * off];
+    });
+    const maxAmp = 0.5 * Math.min(...nodes.map((n) => n.Wv)) - 12;
+    if (maxAmp < 8) return 0;                       // the valley floor is too narrow for bends
+    let lo = 0, hi = maxAmp;
+    for (let it = 0; it < 14; it++) { const mid2 = 0.5 * (lo + hi); if (pathLen(build(mid2)) / chord < sinTarget) lo = mid2; else hi = mid2; }
+    const pts = build(0.5 * (lo + hi));
+    nodes.forEach((n, i) => { n.x = pts[i][0]; n.y = pts[i][1]; });
+    this.nodes.forEach((n) => { n.len = n.down ? Math.hypot(n.down.x - n.x, n.down.y - n.y) : n.len; });
+    const gained = pathLen(pts) - L0;
+    this._respace(); this._slopes(); this._curvature();
+    return gained;
+  };
+  /** Straighten a stretch (what engineers once did to creeks). A sandbox "what if". Returns metres of channel lost. */
   P.straighten = function (nodes) {
-    if (nodes.length < 4) return 0;
-    const a = nodes[0], b = nodes[nodes.length - 1];
-    nodes.forEach((n, i) => { const t = i / (nodes.length - 1); n.x = lerp(a.x, b.x, t); n.y = lerp(a.y, b.y, t); });
-    nodes.forEach((n) => { n.len = n.down ? Math.hypot(n.down.x - n.x, n.down.y - n.y) : n.len; });
-    this._slopes(); return 0;
+    if (!this.canReshape(nodes)) return 0;
+    const a = nodes[0], b = nodes[nodes.length - 1], L0 = nodes.reduce((q, n) => q + n.len, 0);
+    nodes.forEach((n, i) => { if (i === 0 || i === nodes.length - 1) return; const t = i / (nodes.length - 1); n.x = lerp(a.x, b.x, t); n.y = lerp(a.y, b.y, t); });
+    this.nodes.forEach((n) => { n.len = n.down ? Math.hypot(n.down.x - n.x, n.down.y - n.y) : n.len; });
+    this._respace(); this._slopes(); this._curvature();
+    return L0 - nodes.reduce((q, n) => q + n.len, 0);
   };
   /** The big river at the bottom cuts down (or fills up): a wave of incision runs up the creek. */
   P.baseLevel = function (dz) { this.outlet.bed -= dz; this.outlet.fp -= dz; this.outlet.tAll = 0; this.outlet.tSoil = 0; this._slopes(); };
+
+  // ---- what the screen asks for ----------------------------------------------------------------------
+  /** The shape of the valley floor across the creek at a node, as [offset from the middle (m), height (m)] points, left bank to right bank,
+      plus the heights of the water in floods. */
+  P.section = function (n, opt) {
+    opt = opt || {};
+    const Ht = trench(n), Hz = benchDepth(n), m = n.m, hw = n.wb / 2, top = topWidth(n), half = Math.max(n.Wv / 2, top / 2 + 6);
+    const pts = [], bed = n.bed, fp = n.fp;
+    const right = [[hw, bed]];
+    if (Hz > 0 && n.bw > 0.05) { const x1 = hw + m * Hz; right.push([x1, bed + Hz], [x1 + n.bw / 2, bed + Hz]); right.push([x1 + n.bw / 2 + m * (Ht - Hz), fp]); }
+    else right.push([hw + m * Ht, fp]);
+    const xe = right[right.length - 1][0];
+    right.push([Math.max(half, xe + 8), fp + 0.05 * (Math.max(half, xe + 8) - xe) / 8]);
+    for (let i = right.length - 1; i >= 0; i--) pts.push([-right[i][0], right[i][1]]);
+    for (let i = 0; i < right.length; i++) pts.push([right[i][0], right[i][1]]);
+    const levels = {}, S = n._S;
+    [1, 10, 100].forEach((T) => { const h = hydraulics(n, kOfT(T) * Math.pow(n.A, 0.8) * n.qf, S); levels[T] = bed + h.y; });
+    return { pts, bed, fp, half, levels, bankHeight: Ht, benchDepth: Hz };
+  };
+  /** Lane's balance for a node: what the floods could carry in an average year against what actually went through this year (m3 of gravel). */
+  P.balance = function (n) {
+    const cap = capYear(refTaus(n, n.A, n._S), Math.max(n.wb, 1), n.D50), load = n.acc ? n.acc.qs : 0;
+    return { cap, load, ratio: cap / Math.max(load, 1e-6) };
+  };
+  /** A 0..1 score for the whole valley: how much of the main creek is steady or healed (by length), and how little mud is leaving. */
+  P.health = function () {
+    const w = { I: 1, V: 1, IV: 0.7, III: 0.35, II: 0.2 };
+    let L = 0, sc = 0, ranchL = 0, ranchSc = 0, cut = 0;
+    this.main.nodes.forEach((n) => {
+      const v = w[n.stage] != null ? w[n.stage] : 0.5; L += n.len; sc += v * n.len;
+      if (n.ranch) { ranchL += n.len; ranchSc += v * n.len; }
+      if (trench(n) > Math.max(1.5 * R.natural(n.A).d, R.natural(n.A).d + 0.5)) cut += n.len;
+    });
+    const rec = this.series.slice(-5), fines = rec.length ? rec.reduce((q, r) => q + r.exportFines, 0) / rec.length : 0;
+    return { main: L ? sc / L : 0, ranch: ranchL ? ranchSc / ranchL : 0, cutShare: L ? cut / L : 0, finesPerYear: fines, lengthKm: L / 1000 };
+  };
+  /** What the ranch map tells the valley: bank plant cover on the ranch creek and gullies (0..1 bare share), the share by which the ranch's storm
+      peaks are cut, and how much more or less soil leaves the ranch land. */
+  P.setRanchInputs = function (o) {
+    o = o || {};
+    if (o.peakCut != null) this.p.ranchRed = clamp(o.peakCut, 0, 0.3);
+    if (o.landFactor != null) this.nodes.forEach((n) => { if (n.ranch) n.landF = clamp(o.landFactor, 0.2, 2); });
+    if (o.mainBare != null) this.nodes.forEach((n) => { if (n.ranch && n.reach.main) n.vegT = clamp(0.8 - 0.65 * o.mainBare, 0.15, 0.8); });
+    if (o.gullyBare != null) this.nodes.forEach((n) => { if (n.reach.ranch) n.vegT = clamp(0.8 - 0.65 * o.gullyBare, 0.1, 0.8); });
+  };
 
   // ---- save and load ---------------------------------------------------------------------------------
   const NODE_KEYS = ['id', 'x', 'y', 'len', 'A', 'aLat', 'bed', 'tAll', 'tSoil', 'fp', 'wb', 'm', 'bw', 'bz', 'Wv', 'D50', 'soil', 'veg', 'vegT', 'ledge', 'ranch', 'ranchArc', 'supG', 'supF', 'landF', 'ax', 'ay', 'anx', 'any', 'stage', 'type'];

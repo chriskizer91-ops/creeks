@@ -8,7 +8,7 @@ Creek.CONFIG = {
 
   // Feature modules to load, in order: each id is a script src/mod-<id>.js (see docs/EXTENSION_API.md).
   // ?mods=a,b in the address replaces this list ("?mods=" means none); ?addmods=c adds to it.
-  modules: [],
+  modules: ['river'],
 
   // The ranch: 1400 m × 1450 m = 2.03 km² ≈ 502 acres. x runs west→east, y runs north→south (downhill).
   mapW: 1400, mapH: 1450,

@@ -25,7 +25,7 @@ for mid in mods:
     except IOError:
         sys.stderr.write('warning: module "%s" is listed in config.js but src/mod-%s.js does not exist; skipping it\n' % (mid, mid))
 
-order = ['config', 'core', 'world', 'sim', 'shade', 'render', 'game', 'ui', 'story']
+order = ['config', 'core', 'world', 'river-core', 'river-calib', 'sim', 'shade', 'render', 'game', 'ui', 'story']
 js = '\n'.join([rd('src/%s.js' % n) for n in order] + mod_src + [rd('src/main.js')])
 worker = 'self.window = self;\n' + rd('src/config.js') + '\n' + rd('src/world.js') + \
     '\nonmessage = function (e) { const d = e.data, r = Creek.generateSlab(d.dx, d.j0, d.j1); postMessage(r, [r.T.buffer, r.M.buffer]); };\n'

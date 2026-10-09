@@ -19,9 +19,11 @@ the finest level that runs a storm in ~100 s. Change it from the ☰ menu (it re
 - `src/worker.js`  lets several CPU cores build the terrain
 - `src/sim.js`     the water / erosion / soil engine on the GPU. Owns the data.
 - `src/render.js`  the flat map drawing. Only reads the data.
+- `src/river-core.js`, `src/river-calib.js`, `src/mod-river.js`  **River scale**: the whole valley, decades at a time (see `docs/RIVER_SCALE.md`)
 - `src/game.js`    camera, touch, tools, fields, money, storms, measurements, hints
 - `src/ui.js`, `src/story.js`, `src/main.js`  screens, the three-year story, start-up
 - `tools/bundle.py` packs everything into one html file if a host needs that
+- `tools/river-test.js`, `tools/river-calibrate.js`, `tools/river-selftest.js`  run the river model in Node (see `docs/RIVER_SCALE.md`)
 - `assets/pictures/`, `assets/extras/`  the painted pictures
 
 ## Picture slots (ranch)
@@ -34,4 +36,5 @@ Each slot falls back to a picture from the first set until a ranch painting exis
 - Rain depths in `config.js` (`storms`, 30-minute core) are approximate DFW values typed from memory. NOAA's server was not
   reachable. Check them against NOAA Atlas 14 vol. 11 for your spot and edit.
 - Erosion strength (`sim.Kc`, `sim.morph`, `slumpRate`), money numbers and crop yields are first guesses.
-- Not built yet: saving, neighbours joining in (hook: `upstreamFactor`), skipping years, wildlife, 3D view.
+- River scale: after changing the river model's physics or valley, re-run `node tools/river-calibrate.js 600` and commit `src/river-calib.js`; `node tools/river-selftest.js` checks the behaviour.
+- Not built yet: neighbours joining in (hook: `upstreamFactor`), skipping years, wildlife. Work-in-progress modules (3D view, hydrology lab, storm graph, save and settings, audio, ranch health, coach) are in `src/mod-*.js` and are not switched on in `config.js` yet.

@@ -3,7 +3,7 @@
    Usage:  node tools/smoke.js [root] [extra query, e.g. "mods=example"]
      root   folder to serve (default: the repo root). Point it at a git worktree or an export of any commit.
    Prints one PASS or FAIL line per check, then a total. Exit code 1 if anything failed.
-   Set ONLY=<word> to run just the sections whose name contains it (free play, extension API, storm controls, story opening, missing module).
+   Set ONLY=<word> to run just the sections whose name contains it (free play, extension API, storm controls, example module, river scale, story opening, missing module).
    Screenshots go to /tmp/creek-work/smoke/. Uses tools/testlib.js (level 3, short storms, never level 0/1).
    Checks that rely on the extension API (events, series...) are skipped with a note when the API is not there. */
 'use strict';
@@ -472,6 +472,46 @@ async function exampleChecks() {
   } finally { await t.close(); }
 }
 
+async function riverScale() {
+  for (const vp of [{ width: 1280, height: 800, touch: false }, { width: 360, height: 740, touch: true }]) {
+    const tag = vp.width + ' px';
+    const t = await T.open({ root, query: 'level=3&quick=1&free=1' + extra, viewport: { width: vp.width, height: vp.height }, touch: vp.touch, dir: DIR });
+    try {
+      await t.sleep(500);
+      const has = await t.eval(() => ({ mod: (Creek.enabledModules || []).indexOf('river') >= 0, api: !!Creek.river, core: !!(Creek.River && Creek.River.Model), errs: (Creek.moduleErrors || []).length, btn: !!document.getElementById('btnRiver') }));
+      if (!has.core) { note('river scale is not in this build: skipped'); return; }
+      check('river scale starts (' + tag + ')', has.mod && has.api && has.errs === 0 && has.btn, has);
+      await t.eval(() => { Creek.settings.set('river.seen', true); });
+      await t.eval(() => document.getElementById('btnRiver').click());
+      await t.sleep(1500);
+      const o = await t.eval(() => ({ open: Creek.river.isOpen(), cls: document.getElementById('app').classList.contains('river-on'), nodes: Creek.river.model() ? Creek.river.model().nodes.length : 0, backdrop: !!Creek.river.state.backdrop, tile: !!Creek.river.state.tile, gate: typeof game.frameGate }));
+      check('the Valley button opens the valley view (' + tag + ')', o.open && o.cls && o.nodes > 900 && o.backdrop && o.tile && o.gate === 'function', o);
+      const y = await t.eval(async () => { await Creek.river.run(2); return Creek.river.model().year; });
+      check('two years go by (' + tag + ')', y === 2, y);
+      const sel = await t.eval(() => { const m = Creek.river.model(), n = m.main.nodes.filter((q) => q.ranch)[8]; Creek.river.select(n.id); const el = document.getElementById('rvInfo'); return { shown: !el.classList.contains('hidden'), text: el.textContent.slice(0, 120), over: el.scrollWidth > el.clientWidth + 2, canvases: el.querySelectorAll('canvas').length }; });
+      check('tapping the creek opens the inspector with charts (' + tag + ')', sel.shown && /Plum Creek/.test(sel.text) && sel.canvases === 3 && !sel.over, sel);
+      const lenses = await t.eval(() => Creek.river.LENSES.map((l) => { Creek.river.setLens(l.id); Creek.river.render(); return l.id; }));
+      check('every lens draws (' + tag + ')', lenses.length === 8 && t.errors.length === 0, { lenses: lenses.join(), errors: t.errors.slice(0, 2) });
+      await t.eval(() => Creek.river.setLens('stage'));
+      const w = await t.eval(() => { const m = Creek.river.model(), n = m.main.nodes.filter((q) => q.ranch)[30], c0 = game.cash; const ok = Creek.river.useTool(Creek.river.TOOLS.find((q) => q.id === 'weir'), null, n); return { ok, paid: c0 - game.cash, struct: !!n.struct }; });
+      check('a rock weir can be built and costs money (' + tag + ')', w.ok && w.paid === 900 && w.struct, w);
+      const f = await t.eval(async () => { await Creek.river.callFlood(10); const j = Creek.river.state.journal; return { year: Creek.river.model().year, lens: Creek.river.state.lens, flood: j.some((q) => /flood came through/.test(q.text)) }; });
+      check('a called flood runs a year and shows the flood view (' + tag + ')', f.year === 3 && f.lens === 'flood' && f.flood, f);
+      if (vp.width > 400) {
+        await t.eval(() => { const m = Creek.river.model(); Creek.river.useTool(Creek.river.TOOLS.find((q) => q.id === 'bench'), m.main.nodes.filter((q) => q.ranch).slice(4, 20), null); });
+        const a = await t.eval(() => { const v0 = game.terrainVersion, n = Creek.river.applyToRanch(); return { cells: n, bumped: game.terrainVersion > v0 }; });
+        check('bringing the valley changes to the ranch map re-shapes the land', a.cells > 100 && a.bumped, a);
+        await t.shot('river-1-valley');
+      } else await t.shot('river-2-phone');
+      await t.eval(() => document.getElementById('rvHome').click());
+      await t.sleep(300);
+      const c = await t.eval(() => ({ open: Creek.river.isOpen(), cls: document.getElementById('app').classList.contains('river-on'), gate: game.frameGate == null }));
+      check('the Ranch button comes back to the ranch map (' + tag + ')', !c.open && !c.cls && c.gate, c);
+      check('no console or page errors in the valley view (' + tag + ')', t.errors.length === 0, clean(t));
+    } finally { await t.close(); }
+  }
+}
+
 async function storyOpening() {
   const t = await T.open({ root, query: 'level=3&quick=1' + extra, viewport: { width: 900, height: 600 }, dir: DIR });
   const click = (sel) => t.page.click(sel, { timeout: 20000 });
@@ -512,7 +552,7 @@ async function missingModule() {
 (async () => {
   console.log('Smoke test: ' + root + (extra ? '  (query +' + extra + ')' : ''));
   const only = process.env.ONLY ? process.env.ONLY.toLowerCase() : '';      // ONLY=api runs just the sections whose name contains "api"
-  for (const [name, fn] of [['free play', freePlay], ['extension API', apiChecks], ['storm controls', stormControls], ['example module', exampleChecks], ['story opening', storyOpening], ['missing module', missingModule]]) {
+  for (const [name, fn] of [['free play', freePlay], ['extension API', apiChecks], ['storm controls', stormControls], ['example module', exampleChecks], ['river scale', riverScale], ['story opening', storyOpening], ['missing module', missingModule]]) {
     if (only && name.toLowerCase().indexOf(only) < 0) continue;
     try { await fn(); } catch (e) { check(name + ' ran to the end', false, String(e && e.stack || e).split('\n').slice(0, 4).join(' | ')); }
   }
