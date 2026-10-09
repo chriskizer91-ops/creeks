@@ -328,6 +328,7 @@
   function nearestPt(pts, y) { let b = pts[0], bd = 1e9; pts.forEach(p => { const d = Math.abs(p[1] - y); if (d < bd) { bd = d; b = p; } }); return { x: b[0], y: b[1] }; }
 
   Creek.generateWorld = generateWorld;
+  Creek.ranchStreams = buildStreams;   // the creek lines and their bed profiles (the river-scale model starts from these)
   Creek.generateSlab = generateSlab;
   Creek.generateWorldAsync = generateWorldAsync;
   Creek.sstep = sstep;
