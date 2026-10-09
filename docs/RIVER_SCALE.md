@@ -61,8 +61,12 @@ healthy streams start in balance and hold still. **After any change to the physi
 The ranch's own creek and gullies cannot be re-shaped from the valley (`canReshape` is false): they are drawn on the ranch map. Everything else
 that is vertical (plant, bench, structures) works there too. Money comes out of the ranch's cash; it can go negative (there is no losing).
 
+**Reading and checking** (⋯ menu): a **valley journal** (what happened, badges), **charts** of the mud budget (banks and bed on one side, floodplain, ponds and
+export on the other), the flood peaks at the bottom of the ranch and the health of the creek, **Reading the map** (how contour lines work), and a ghost
+line showing where each creek used to run. Tapping bare ground with the Look tool reads its height above the valley mouth and its slope.
+
 **Events** (🌊 menu): 10-, 50- and 100-year floods for the next year, a dry year, and the big river at the valley mouth cutting down 3 ft
-(`baseLevel`): a wave of digging runs up the creek.
+(`baseLevel`): a wave of digging runs up the creek. A called flood also plays a short flood-wave animation down the creeks.
 
 **Lenses**: Health (stage), Bed up or down since the start, Bank height, Flood force (10-year shear), Plants, Stream type, Gravel moving, Last flood.
 

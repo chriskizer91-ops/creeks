@@ -10,6 +10,8 @@
   const ui = Creek.ui = {};
   ui.mode = 'free';
 
+  // In the single-file build the pictures are inside the page (Creek.ASSETS, made by tools/bundle.py --embed); otherwise a path is used as it is.
+  Creek.asset = Creek.asset || ((p) => (Creek.ASSETS && Creek.ASSETS[p]) || p);
   const PIC = 'assets/pictures/', EX = 'assets/extras/';
   const ranch = (n) => PIC + 'ranch-' + n + '.jpg';
   // Slots for the ranch pictures. Until the ranch paintings exist, each falls back to a picture from the first set.
@@ -60,8 +62,8 @@
         '<div class="over">' + (o.cls === 'title' ? '<h1></h1>' : '<h2></h2>') + '<p class="t"></p>' + (o.html || '') + '<div class="btns"></div></div>';
       if (o.img) {
         const im = card.querySelector('img'), list = [].concat(o.img); let k = 0;
-        im.onerror = () => { k++; if (k < list.length) im.src = list[k]; else im.removeAttribute('src'); };
-        im.src = list[0];
+        im.onerror = () => { k++; if (k < list.length) im.src = Creek.asset(list[k]); else im.removeAttribute('src'); };
+        im.src = Creek.asset(list[0]);
       }
       card.querySelector(o.cls === 'title' ? 'h1' : 'h2').textContent = o.title || '';
       const p = card.querySelector('p.t'); if (o.text) p.textContent = o.text; else p.remove();
@@ -346,7 +348,7 @@
   ui.book = async function () {
     const all = [PIC + '01-title.jpg', PIC + '02-move-in-day.jpg', PIC + '03-dry-creek.jpg', PIC + '04-storm.jpg', PIC + '05-neighbors.jpg', PIC + '06-years-later.jpg', PIC + '07-rain-barrel.jpg', PIC + '08-rain-garden.jpg', PIC + '09-roots.jpg', PIC + '10-bda.jpg']
       .concat(['making-room-for-roots', 'willow-work', 'first-flow', 'prairie-visitors', 'turtle-return', 'heron-at-dawn', 'creekside-evening'].map(n => EX + n + '.jpg'));
-    const html = '<div class="gallery">' + all.map((s, i) => '<img data-i="' + i + '" src="' + s + '" alt="">').join('') + '</div>';
+    const html = '<div class="gallery">' + all.map((s, i) => '<img data-i="' + i + '" src="' + Creek.asset(s) + '" alt="">').join('') + '</div>';
     const p = ui.card({ title: 'Picture book', html, buttons: [{ label: 'Close' }] });
     document.querySelectorAll('.gallery img').forEach((im) => im.onclick = () => { $('modal').classList.add('hidden'); ui.card({ img: all[+im.dataset.i], buttons: [{ label: 'Back', value: 'b' }] }).then(ui.book); });
     return p;

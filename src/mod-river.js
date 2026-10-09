@@ -367,6 +367,47 @@
     const word = slope < 1.5 ? 'nearly flat. The contour lines are far apart.' : slope < 6 ? 'gently sloping.' : slope < 15 ? 'a real slope. The contour lines are close together.' : 'steep. The contour lines are packed together.';
     showToast('Ground here: ' + fmt(up) + ' feet above the valley mouth. The slope is ' + slope.toFixed(1) + '%, ' + word, 5200); redraw(); setTimeout(redraw, 4000);
   }
+  /** Charts of the last decades: where the mud comes from and where it goes, the flood peaks, and how healthy the creek is. */
+  async function showCharts() {
+    const m = S.model, ser = m.series.slice(-80);
+    if (ser.length < 2) { showToast('Let a few years go by first, then look at the charts.'); return; }
+    const TON = 1.3;
+    await ui.card({
+      title: 'Charts · years ' + ser[0].year + ' to ' + ser[ser.length - 1].year,
+      html: '<h3 style="margin:2px 4px">Where the mud and gravel come from, and where it goes</h3><canvas id="rvC1" style="width:100%;border-radius:10px"></canvas>' +
+        '<p class="rvcap">Up (above the line) is what the creek picks up: banks washing back and the bed digging. Down is where it ends up: on the floodplain, caught in a pond, or carried out of the valley. Tons a year.</p>' +
+        '<h3 style="margin:10px 4px 2px">Biggest flood each year at the bottom of your ranch</h3><canvas id="rvC2" style="width:100%;border-radius:10px"></canvas>' +
+        '<h3 style="margin:10px 4px 2px">How healthy the creek is</h3><canvas id="rvC3" style="width:100%;border-radius:10px"></canvas>' +
+        '<p class="rvcap">Gold is the whole creek, green is the ranch stretch. 100% means steady or healed along the whole length.</p>',
+      buttons: [{ label: 'Close' }],
+      onShow: () => {
+        const w = Math.min(560, ($('card').clientWidth || 360) - 30), n = ser.length, X = (i, pad) => pad + i / (n - 1) * (w - 2 * pad);
+        const line = (g, vals, X2, Y, col, wd) => { g.beginPath(); vals.forEach((v, i) => { const x = X2(i), y = Y(v); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.strokeStyle = col; g.lineWidth = wd || 2; g.stroke(); };
+        // 1. budget (stacked bars)
+        let g = setupCanvas($('rvC1'), w, 170); g.fillStyle = '#f2ecdd'; g.fillRect(0, 0, w, 170);
+        const src = ser.map((r) => [(r.bankErosion || 0) * TON, (r.bedErosion || 0) * TON]), snk = ser.map((r) => [(r.floodplainDep || 0) * TON, (r.trapped || 0) * TON, (r.exportFines + r.exportGravel) * TON]);
+        const up = Math.max(1, ...src.map((a) => a[0] + a[1])), dn = Math.max(1, ...snk.map((a) => a[0] + a[1] + a[2])), tot = up + dn, zero = 12 + (170 - 24) * up / tot, bw = Math.max(2, (w - 20) / n - 1);
+        ser.forEach((r, i) => {
+          const x = 10 + i * (w - 20) / n; let y = zero;
+          [[src[i][0], '#b5654a'], [src[i][1], '#8a5a3a']].forEach(([v, c]) => { const h = v / tot * (170 - 24); y -= h; g.fillStyle = c; g.fillRect(x, y, bw, h); });
+          y = zero; [[snk[i][0], '#6c9a4a'], [snk[i][1], '#6d8fa8'], [snk[i][2], '#4a4a5a']].forEach(([v, c]) => { const h = v / tot * (170 - 24); g.fillStyle = c; g.fillRect(x, y, bw, h); y += h; });
+        });
+        g.strokeStyle = '#3b2a1a'; g.beginPath(); g.moveTo(0, zero); g.lineTo(w, zero); g.stroke();
+        g.font = '10.5px system-ui'; g.fillStyle = '#6b5640'; g.textAlign = 'left'; g.fillText('■ banks  ■ bed', 8, 12); g.fillStyle = '#6c9a4a'; g.fillText('■ floodplain', 8, 164); g.fillStyle = '#6d8fa8'; g.fillText('■ ponds', 76, 164); g.fillStyle = '#4a4a5a'; g.fillText('■ out of the valley', 130, 164);
+        g.fillStyle = '#6b5640'; g.textAlign = 'right'; g.fillText(fmt(up) + ' t/yr up', w - 8, 12);
+        // 2. flood peaks
+        g = setupCanvas($('rvC2'), w, 110); g.fillStyle = '#f2ecdd'; g.fillRect(0, 0, w, 110);
+        const pk = ser.map((r) => r.peak * CFS), pm = Math.max(10, ...pk), Y2 = (v) => 100 - v / pm * 86;
+        pk.forEach((v, i) => { g.fillStyle = v > pm * 0.6 ? '#3f6f94' : '#8fb4cc'; const x = 10 + i * (w - 20) / n; g.fillRect(x, Y2(v), Math.max(2, (w - 20) / n - 1), 100 - Y2(v)); });
+        g.font = '10.5px system-ui'; g.fillStyle = '#6b5640'; g.textAlign = 'right'; g.fillText(fmt(pm) + ' cubic feet a second', w - 8, 12);
+        // 3. health
+        g = setupCanvas($('rvC3'), w, 100); g.fillStyle = '#f2ecdd'; g.fillRect(0, 0, w, 100);
+        const Y3 = (v) => 92 - v * 80; g.strokeStyle = '#d9ccae'; [0.5, 1].forEach((v) => { g.beginPath(); g.moveTo(0, Y3(v)); g.lineTo(w, Y3(v)); g.stroke(); });
+        line(g, ser.map((r) => r.health), (i) => X(i, 10), Y3, '#d9a23b', 2.5); line(g, ser.map((r) => r.ranchHealth), (i) => X(i, 10), Y3, '#5d8a3a', 2.5);
+      }
+    });
+  }
+
   async function readingTheMap() {
     await ui.card({
       title: 'Reading the map', html:
@@ -432,11 +473,14 @@
     // flood water spreading over the valley floor
     if (S.lens === 'flood') {
       ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(80,150,215,0.55)';
+      const pu = S.pulse, front = pu ? Math.min(1, (performance.now() - pu.t0) / pu.dur) * pu.tmax * 1.15 : 1e9;
       m.nodes.forEach((n) => {
         if (!n.down || !n.yMax) return;
+        let a = 1; if (pu) { a = clamp((front - (n._arr || 0)) / (0.12 * pu.tmax), 0, 1); if (a <= 0) return; }
         const wfl = Math.min(R.widthAt(n, n.yMax), Math.max(n.Wv, R.topWidth(n)));
-        ctx.lineWidth = Math.max(wfl * sc, 2); ctx.beginPath(); ctx.moveTo(w2sx(n.x), w2sy(n.y)); ctx.lineTo(w2sx(n.down.x), w2sy(n.down.y)); ctx.stroke();
+        ctx.globalAlpha = a; ctx.lineWidth = Math.max(wfl * sc, 2); ctx.beginPath(); ctx.moveTo(w2sx(n.x), w2sy(n.y)); ctx.lineTo(w2sx(n.down.x), w2sy(n.down.y)); ctx.stroke();
       });
+      ctx.globalAlpha = 1;
     }
     // the ranch
     const rx = w2sx(GEO.RX), ry = w2sy(GEO.RY), rw = GEO.RW * sc, rh = GEO.RH * sc;
@@ -780,12 +824,21 @@
       add('🧭 Fit the whole valley', () => { fitAll(); });
       add('🔄 Bring the changes to my ranch map', () => confirmApply());
       add('🔁 Start the valley over', () => { S.play = false; newModel(); fitAll(); renderAll(); showToast('A fresh valley.'); });
+      add('📊 Charts: mud, floods, health', () => showCharts());
       add('🧭 Reading the map', () => readingTheMap());
       add('ℹ️ What is this?', () => explain());
     }
     mnu.classList.remove('hidden');
   }
-  function callFlood(T) { S.play = false; S.force = { T }; return runYears(1).then(() => { setLens('flood'); showToast('A ' + T + '-year flood roared through. Switch the view to see what it did.', 5200); }); }
+  /** A flood wave runs down the creeks on screen for a few seconds after you call a flood (the water arrives sooner near the heads). */
+  function startPulse() {
+    const m = S.model; let tmax = 1;
+    m.order.forEach((n) => { n._arr = n.ups.reduce((q, u) => Math.max(q, u._arr || 0), 0) + n.len / 3; tmax = Math.max(tmax, n._arr); });
+    S.pulse = { t0: performance.now(), dur: 3200, tmax };
+    const tick = () => { if (!S.pulse || !S.open) return; if (performance.now() - S.pulse.t0 > S.pulse.dur + 900) { S.pulse = null; redraw(); return; } redraw(); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }
+  function callFlood(T) { S.play = false; S.force = { T }; return runYears(1).then(() => { setLens('flood'); startPulse(); showToast('A ' + T + '-year flood roared through. Switch the view to see what it did.', 5200); }); }
 
   function setLens(id, byUser) {
     S.lens = id; document.querySelectorAll('#rvLens .chip').forEach((b) => b.classList.toggle('on', b.dataset.id === id));

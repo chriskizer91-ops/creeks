@@ -121,7 +121,7 @@
       S: 0.004, tau: 0, yMax: 0, tauMax: 0, qgOut: 0, qfOut: 0, stage: 'I', type: 'C', ema: { bed: 0, wid: 0 }, hist: [],
       acc: null, _S: 0.004, nC: 0.035, nB: 0.06, nF: 0.1, D50nat: 0.03,
       // working values the flood routine keeps on every node (declared here so all nodes have the same shape, which keeps the model fast)
-      _h: null, _S0: 0.004, _dzEv: 0, _fb: 0, _qgLat: 0, _qfLat: 0, _dz: 0, _cut: 0, _cutSoil: false, _shift: 0, _Din: 0, _landMul: 1, _dug: 0, _slumpMud: 0, supFLateral: 0, tau10: 0, _Sw: 0.004
+      _h: null, _S0: 0.004, _dzEv: 0, _fb: 0, _qgLat: 0, _qfLat: 0, _dz: 0, _cut: 0, _cutSoil: false, _shift: 0, _Din: 0, _landMul: 1, _dug: 0, _slumpMud: 0, supFLateral: 0, tau10: 0, _Sw: 0.004, _arr: 0
     }, o);
   }
   /** Depth of the trench below the floodplain (the bank height), at least a little. */
@@ -635,7 +635,8 @@
     ev.forEach((e) => this._runEvent(e, rep));
     this._yearEnd(rep);
     rep.peakRanch = rep.peakRanch || 0;
-    this.series.push({ year: this.year, peak: rep.peakRanch, exportFines: rep.exportFines, exportGravel: rep.exportGravel, bankErosion: rep.bankErosion, floodplainDep: rep.floodplainDep });
+    const hh = this.health();
+    this.series.push({ year: this.year, peak: rep.peakRanch, exportFines: rep.exportFines, exportGravel: rep.exportGravel, bankErosion: rep.bankErosion, bedErosion: rep.bedErosion, floodplainDep: rep.floodplainDep, trapped: rep.trapped, health: hh.main, ranchHealth: hh.ranch });
     if (this.series.length > 600) this.series.shift();
     return rep;
   };
