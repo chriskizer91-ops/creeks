@@ -274,7 +274,9 @@
     if (!touched) return 0;
     game.snapshotForUndo && game.snapshotForUndo();
     sim.restore(T, null);
+    sim.undoOK = true;                 // restore() switches undo off, but the snapshot taken just above is still in place: keep it
     S.applied = m.snapshotProfile();
+    S.appliedBefore = ref; S.justApplied = true;
     return touched;
   }
 
@@ -344,7 +346,7 @@
       d[k] = clamp(col[0] * lum, 0, 255); d[k + 1] = clamp(col[1] * lum, 0, 255); d[k + 2] = clamp(col[2] * lum, 0, 255); d[k + 3] = 255;
     }
     g.putImageData(img, 0, 0);
-    S.tile = Object.assign({ cv, z, nx, ny, dx }, contourPaths(z, nx, ny, dx, 5 / FT, 25 / FT, 60)); S.tileStale = false;
+    S.tile = Object.assign({ cv, z, nx, ny, dx }, contourPaths(z, nx, ny, dx, 5 / FT, 25 / FT, 60)); S.tileStale = false; S.tileId = (S.tileId || 0) + 1;
   }
 
   /** Height of the ground (m) at a valley point: the ranch's own map inside the dashed box, the valley picture elsewhere. */
@@ -429,35 +431,37 @@
     ctx.fillStyle = '#e8dfc6'; ctx.fillRect(0, 0, S.w, S.h);
     if (!m || !S.backdrop) { ctx.fillStyle = '#6b5640'; ctx.font = '16px system-ui'; ctx.textAlign = 'center'; ctx.fillText('Building the valley…', S.w / 2, S.h / 2); return; }
     const tx = S.w / 2 - S.cam.x * sc, ty = S.h / 2 - S.cam.y * sc;
-    // hills
-    ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    ctx.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * tx, dpr * ty);
-    ctx.drawImage(S.backdrop, 0, 0, GEO.W, GEO.H);
-    // contour lines
-    if (Creek.settings && Creek.settings.get('contours', true) !== false) {
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = 'rgba(120,80,40,0.30)'; ctx.lineWidth = 0.9 / sc; ctx.stroke(S.contours.minor);
-      ctx.strokeStyle = 'rgba(110,70,30,0.62)'; ctx.lineWidth = 1.5 / sc; ctx.stroke(S.contours.major);
-    }
-    // the ranch's own map, inside the dashed box
-    if (S.tile) {
-      ctx.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * (tx + GEO.RX * sc), dpr * (ty + GEO.RY * sc));
-      ctx.imageSmoothingEnabled = true; ctx.drawImage(S.tile.cv, 0, 0, GEO.RW, GEO.RH);
-      if (sc > 0.12 && Creek.settings && Creek.settings.get('contours', true) !== false) {
-        ctx.strokeStyle = 'rgba(110,70,30,0.34)'; ctx.lineWidth = 0.8 / sc; ctx.stroke(S.tile.minor);
-        ctx.strokeStyle = 'rgba(100,60,25,0.7)'; ctx.lineWidth = 1.4 / sc; ctx.stroke(S.tile.major);
+    const showLines = !(Creek.settings && Creek.settings.get('contours', true) === false);
+    // The ground (hills, contour lines, the ranch's own map) only changes when the camera moves, so it is drawn into a spare canvas and copied.
+    const key = [S.cam.x.toFixed(1), S.cam.y.toFixed(1), sc.toFixed(5), S.w, S.h, dpr, showLines, S.tile ? S.tile.cv.width : 0, S.tileId || 0].join();
+    if (!S.layer) S.layer = { cv: document.createElement('canvas'), key: '' };
+    const L = S.layer;
+    if (L.key !== key) {
+      L.cv.width = Math.round(S.w * dpr); L.cv.height = Math.round(S.h * dpr);
+      const g = L.cv.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = '#e8dfc6'; g.fillRect(0, 0, S.w, S.h);
+      g.save(); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * tx, dpr * ty);
+      g.drawImage(S.backdrop, 0, 0, GEO.W, GEO.H);
+      if (showLines) { g.lineJoin = 'round'; g.strokeStyle = 'rgba(120,80,40,0.30)'; g.lineWidth = 0.9 / sc; g.stroke(S.contours.minor); g.strokeStyle = 'rgba(110,70,30,0.62)'; g.lineWidth = 1.5 / sc; g.stroke(S.contours.major); }
+      if (S.tile) {
+        g.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * (tx + GEO.RX * sc), dpr * (ty + GEO.RY * sc));
+        g.imageSmoothingEnabled = true; g.drawImage(S.tile.cv, 0, 0, GEO.RW, GEO.RH);
+        if (sc > 0.12 && showLines) { g.strokeStyle = 'rgba(110,70,30,0.34)'; g.lineWidth = 0.8 / sc; g.stroke(S.tile.minor); g.strokeStyle = 'rgba(100,60,25,0.7)'; g.lineWidth = 1.4 / sc; g.stroke(S.tile.major); }
       }
+      g.restore();
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (sc > 0.08 && showLines) {
+        g.font = '10px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        S.contours.labels.forEach((l) => { const x = w2sx(l.x), y = w2sy(l.y); if (x < -20 || y < -20 || x > S.w + 20 || y > S.h + 20) return; g.lineWidth = 3; g.strokeStyle = 'rgba(232,223,198,0.85)'; g.strokeText(l.t, x, y); g.fillStyle = 'rgba(100,60,25,0.9)'; g.fillText(l.t, x, y); });
+      }
+      if (S.tile && sc > 0.3 && showLines) {
+        g.font = '10px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        S.tile.labels.forEach((l) => { const x = w2sx(GEO.RX + l.x), y = w2sy(GEO.RY + l.y); if (x < -20 || y < -20 || x > S.w + 20 || y > S.h + 20) return; g.lineWidth = 3; g.strokeStyle = 'rgba(232,223,198,0.85)'; g.strokeText(l.t, x, y); g.fillStyle = 'rgba(100,60,25,0.9)'; g.fillText(l.t, x, y); });
+      }
+      L.key = key;
     }
-    ctx.restore();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (sc > 0.08 && Creek.settings && Creek.settings.get('contours', true) !== false) {
-      ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      S.contours.labels.forEach((l) => { const x = w2sx(l.x), y = w2sy(l.y); if (x < -20 || y < -20 || x > S.w + 20 || y > S.h + 20) return; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(232,223,198,0.85)'; ctx.strokeText(l.t, x, y); ctx.fillStyle = 'rgba(100,60,25,0.9)'; ctx.fillText(l.t, x, y); });
-    }
-    if (S.tile && sc > 0.3) {
-      ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      S.tile.labels.forEach((l) => { const x = w2sx(GEO.RX + l.x), y = w2sy(GEO.RY + l.y); if (x < -20 || y < -20 || x > S.w + 20 || y > S.h + 20) return; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(232,223,198,0.85)'; ctx.strokeText(l.t, x, y); ctx.fillStyle = 'rgba(100,60,25,0.9)'; ctx.fillText(l.t, x, y); });
-    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(L.cv, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // old loops (oxbow lakes)
     m.oxbows.forEach((o) => {
       ctx.beginPath(); o.pts.forEach((p, i) => { const x = w2sx(p[0]), y = w2sy(p[1]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
@@ -470,16 +474,22 @@
       S.ghost.forEach((pts) => { ctx.beginPath(); pts.forEach((p, i) => { const x = w2sx(p[0]), y = w2sy(p[1]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke(); });
       ctx.setLineDash([]);
     }
-    // flood water spreading over the valley floor
+    // flood water spreading over the valley floor (the width of the water in the biggest flood of the year). One filled shape per step of
+    // brightness rather than one stroke per piece of creek, which is far cheaper to draw.
     if (S.lens === 'flood') {
-      ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(80,150,215,0.55)';
-      const pu = S.pulse, front = pu ? Math.min(1, (performance.now() - pu.t0) / pu.dur) * pu.tmax * 1.15 : 1e9;
+      const pu = S.pulse, front = pu ? Math.min(1, (performance.now() - pu.t0) / pu.dur) * pu.tmax * 1.15 : 1e9, buckets = [new Path2D(), new Path2D(), new Path2D(), new Path2D()], used = [false, false, false, false];
       m.nodes.forEach((n) => {
-        if (!n.down || !n.yMax) return;
+        const d = n.down; if (!d || !n.yMax) return;
         let a = 1; if (pu) { a = clamp((front - (n._arr || 0)) / (0.12 * pu.tmax), 0, 1); if (a <= 0) return; }
-        const wfl = Math.min(R.widthAt(n, n.yMax), Math.max(n.Wv, R.topWidth(n)));
-        ctx.globalAlpha = a; ctx.lineWidth = Math.max(wfl * sc, 2); ctx.beginPath(); ctx.moveTo(w2sx(n.x), w2sy(n.y)); ctx.lineTo(w2sx(n.down.x), w2sy(n.down.y)); ctx.stroke();
+        const x0 = w2sx(n.x), y0 = w2sy(n.y), x1 = w2sx(d.x), y1 = w2sy(d.y);
+        if ((x0 < -80 && x1 < -80) || (x0 > S.w + 80 && x1 > S.w + 80) || (y0 < -80 && y1 < -80) || (y0 > S.h + 80 && y1 > S.h + 80)) return;
+        const dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
+        const h0 = Math.max(Math.min(R.widthAt(n, n.yMax), Math.max(n.Wv, R.topWidth(n))) * sc, 2) / 2, h1 = Math.max(Math.min(R.widthAt(d, d.yMax || n.yMax), Math.max(d.Wv, R.topWidth(d))) * sc, 2) / 2;
+        const k = Math.min(3, Math.floor(a * 4 - 1e-6)), P = buckets[Math.max(k, 0)]; used[Math.max(k, 0)] = true;
+        P.moveTo(x0 + nx * h0, y0 + ny * h0); P.lineTo(x1 + nx * h1, y1 + ny * h1); P.lineTo(x1 - nx * h1, y1 - ny * h1); P.lineTo(x0 - nx * h0, y0 - ny * h0); P.closePath();
       });
+      ctx.fillStyle = 'rgb(80,150,215)';
+      buckets.forEach((P, k) => { if (!used[k]) return; ctx.globalAlpha = 0.55 * (k + 1) / 4; ctx.fill(P); });
       ctx.globalAlpha = 1;
     }
     // the ranch
@@ -1045,6 +1055,9 @@
         }
       });
       game.on('cash', () => { if (S.open) renderTop(); });
+      // Undo straight after "bring the changes to my ranch map" puts the ranch back, so the valley must remember that it has not been carried over
+      const undo0 = game.undo; game.undo = function () { const r = undo0.apply(this, arguments); if (r && S.justApplied && S.appliedBefore) { S.applied = S.appliedBefore; S.justApplied = false; } return r; };
+      game.on('strokeStart', () => { S.justApplied = false; });
       Creek.river = {
         open, close, isOpen: () => S.open, state: S, model: () => S.model, run: (n) => runYears(n), select: (id) => { const nn = S.model && S.model.byId.get(id); selectNode(nn); return !!nn; },
         setLens, setTool, applyToRanch, fitAll, goRanch, useTool, pickNode, groundH, LENSES, TOOLS, callFlood, render: () => { renderAll(); draw(); }
