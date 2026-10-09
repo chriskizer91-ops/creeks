@@ -1,6 +1,6 @@
 # River scale (the valley view)
 
-A second way to play: zoom out from the 500-acre ranch to the whole valley it sits in (6 km x 15 km, about 6,000 acres drain to the bottom edge)
+A second way to play: zoom out from the 500-acre ranch to the whole valley it sits in (6 km x 15 km; about 5,600 acres drain to the bottom edge, and the creek already drains about 2,900 acres where it enters your ranch)
 and let **decades** go by in seconds. It is a reduced-complexity fluvial geomorphology model with real physics in it, tuned to behave the way
 streams do. It is a toy, not a flood-mapping tool.
 

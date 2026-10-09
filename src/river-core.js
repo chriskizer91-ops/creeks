@@ -1,6 +1,6 @@
 /* River scale: the numbers behind the valley view. No drawing and no GPU in here (it runs in Node for tests too).
 
-   WHAT IT IS. A reduced-complexity model of a whole stream system (a 6 x 15 km valley, about 26 km2 of land drained)
+   WHAT IT IS. A reduced-complexity model of a whole stream system (a 6 x 15 km valley, about 5,600 acres (22 km2) of land drained at the bottom edge)
    that can be run for decades in a blink. Each stream is a chain of nodes (about every 40 m). A node knows its place
    on the map, its channel (bottom width, bank slope, floodplain level, an inset bench), its bed layers (gravel over
    soft soil over limestone), its bank plants, and its flow. Every simulated year it meets a handful of random floods:
