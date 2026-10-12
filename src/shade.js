@@ -303,12 +303,11 @@ vec4 rainOverlay(vec2 fc, vec2 par){                // screen-space streaks, thr
 }
 
 // ---- surface normal for the sun. kg stretches the ground heights (so gentle slopes read), ke the extrusions (3D only).
-// Also leaves the true slope in g_grad and the hollowness in g_curv (from a wider ring, so valleys read as soft shade, not noise).
+// Also leaves the true slope in g_grad and the hollowness in g_curv (from the same four samples).
 vec3 reliefNormal(vec2 w, float e, float kg, float ke, float ee){
   float h0 = hAt(w), hx1 = hAt(w+vec2(e,0.)), hx0 = hAt(w-vec2(e,0.)), hy1 = hAt(w+vec2(0.,e)), hy0 = hAt(w-vec2(0.,e));
   vec2 g = vec2(hx1-hx0, hy1-hy0)/(2.*e);
-  float E = max(2.5*e, 4.);
-  g_curv = (hAt(w+vec2(E,0.)) + hAt(w-vec2(E,0.)) + hAt(w+vec2(0.,E)) + hAt(w-vec2(0.,E)) - 4.*h0)/(E*E);
+  g_curv = (hx1 + hx0 + hy1 + hy0 - 4.*h0)/(e*e);
   g_grad = g; g *= kg;
 #if EXTR
   if (ke > 0.) g += vec2(extrudeAt(w+vec2(ee,0.))-extrudeAt(w-vec2(ee,0.)), extrudeAt(w+vec2(0.,ee))-extrudeAt(w-vec2(0.,ee)))/(2.*ee)*ke;

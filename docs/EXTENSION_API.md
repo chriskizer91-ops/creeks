@@ -93,7 +93,14 @@ json back to the handlers. The save module (`Creek.save`) is expected to call th
 
 Helpers on `game`: `game.inMap(w)` (true if `{x,y}` is on the ranch), `game.toWorld(px, py)`, `game.project(x, y)`, `game.focusOn(x, y, scale)`,
 `game.snapshotForUndo()`, `game.terrainChanged()`, `game.bumpTerrain()`, `game.cashChanged()`, `game.setTool(id, opt?)`, `game.setLens(idOrIndex)`,
-`game.nextLens()`, `game.addLens(def)`, `game.setViewProvider(p)`, `game.provider()`, `game.worldOrNull(p)`.
+`game.nextLens()`, `game.addLens(def)`, `game.setViewProvider(p)`, `game.provider()`, `game.worldOrNull(p)`, `game.undo()`, `game.dropStorm()`, `game.fitCamera()`.
+
+**Undo** keeps several steps: `game.sim.undoMax` snapshots (as many as fit in about 100 MB of graphics memory: 3 at the 1 m level, 12 otherwise),
+`game.sim.undoDepth()` says how many are there, `game.undoState` is the newest `{fields, cash, ledger}`. `sim.undoOK` and `sim.tex.U` (the newest
+land snapshot) still work as before; `sim.restore` puts the stack aside and setting `sim.undoOK = true` right after brings it back.
+
+**`game.insets`** = `{top, bottom, left, right}` in CSS px: how much of the screen the furniture covers (kept up to date by `ui.js`). `game.fitScale` and
+`game.fitCamera()` fit the whole ranch into what is left.
 
 ### Terrain
 
@@ -131,13 +138,15 @@ A listener that throws is logged (`[creek] a "name" listener threw`) and skipped
 | `"reset"` | none | "Start the ranch over", or free play / story starting (`game.resetMap`); a `"terrain"` event follows |
 | `"cash"` | `amount` | money changed (a new balance, in dollars) |
 | `"lens"` | `id` | the view changed |
+| `"undo"` | `depth` (steps left to undo) | an undo snapshot was taken, or a step was undone |
+| `"stormDropped"` | none | a running storm was ended without a report (`game.dropStorm`: a reset or a detail-level change) |
 | `"saved"` | `{slot, meta}` | (save module) a save was written; `slot` is `"auto"`, `"slot1"`... |
 | `"loaded"` | `{slot, meta}` | (save module) a save was put back; module state from `registerState` is already loaded, `"terrain"` came just before. The water was drained |
 
 A storm that is running when the land is rebuilt or started over (a new detail level, the graphics chip coming back, `game.resetMap`: "Start the ranch
-over", free play or the story starting) is dropped by the settings module without a `"stormEnd"`: `game.storm` becomes `null` and the storm box closes.
-A `"reset"` always follows (free play after a level change; after a graphics loss, a reset and then the save is put back). Without the settings module
-the core keeps the old storm running on the new land (see [Notes and gotchas](#notes-and-gotchas) 14).
+over", free play or the story starting) is dropped without a `"stormEnd"` (`game.dropStorm`, which `game.loadLevel` and `game.resetMap` call; the
+settings module does the same for a graphics loss): `game.storm` becomes `null`, `"stormDropped"` fires and the storm box closes. A `"reset"` always
+follows (free play after a level change; after a graphics loss, a reset and then the save is put back).
 
 ### Payload details
 
@@ -204,8 +213,8 @@ Creek.shortcuts.list();   // [{key, label, desc}] of the non-hidden ones, in the
 All on `Creek.ui` (`ui` below). Safe to call again with the same `id`/label (the first one wins).
 
 ```js
-ui.styles(css)                 // injects a <style>; returns the element. Use the game's palette:
-                               // --paper #f4ecd8, --ink #3b2a1a, --ink2, --moss #5d7f3b, --clay #b5654a, --gold #e9a23b, water #4a8aa3
+ui.styles(css)                 // injects a <style>; returns the element. Use the game's palette (style.css :root):
+                               // --paper --paper2 --glass (see-through panel) --ink --ink2 --line --moss --clay --gold --water --sel --shadow
 ui.addButton({ slot, id, label, title, onClick, toggle, on })   // returns the <button class="chip">
 ui.addMenuItem({ label, onClick, alt })
 ui.addSetting({ id, label, help, type, options, min, max, step, default, get, set })
@@ -221,8 +230,9 @@ ui.HOWTO[key] = {title, text, img, square}   // a first-use card for a tool that
   single emoji: the top bar is tight on a phone). `label` is plain text (an emoji plus a word is fine). `toggle: true` flips the `on` look on click;
   `onClick(on, el, event)` gets the new state (`undefined` for a plain button). `el.classList.toggle('on', v)` changes the look later. The element gets
   `id` unless that id is already used in the page. 40 px touch targets are kept by the stylesheet.
-- **`addMenuItem`**: a button in the menu card, between "Settings" and "Start the ranch over". `onClick(game, ui)` runs after the card closes.
-  `alt` (default `true`) is the quieter clay-coloured button; `alt: false` is green.
+- **`addMenuItem`**: a button in the menu card's two-column grid ("More" group), after "Settings" and before "Detail level" and "Start the ranch over".
+  `onClick(game, ui)` runs after the card closes. Start the label with an emoji, like the built-in items. `alt` is kept for old callers but the grid
+  draws every item the same.
 - **`addSetting`**: a row in the Settings card (menu, "Settings"; built in). `type: "toggle"` (boolean), `"slider"` (`min`, `max`, `step`, number) or
   `"choice"` (`options`: `["a","b"]` or `[{value, label}]`). `help` is a small line under the label. Without `get`/`set` the value lives in
   `Creek.settings` under `id` (read it with `Creek.settings.get(id, default)` and listen with `Creek.settings.on(id, fn)`). With `get()`/`set(v)` you handle it yourself.
@@ -241,7 +251,8 @@ The UI also exposes (existing, handy): `ui.mode` (`"free"` or `"story"`), `ui.pi
 ```js
 ui.addTool({
   id: 'trace', icon: '💧', label: 'Trace', kind: 'custom',
-  help: 'Tap the land to see where its water goes.',   // shown as a toast when picked
+  help: 'Tap the land to see where its water goes.',   // shown in the line under the tools while it is picked
+  cost: 'free',                // optional: what it costs, in words (shown after the help)
   card: 'trace',               // optional: key in ui.HOWTO for a first-use card
   readonly: true,              // never changes the land: stays available in the story (see below)
   custom: {
@@ -266,17 +277,18 @@ ui.addTool({
 - No brush circle is drawn for custom tools. Draw your own feedback through `game.extras` or your own panel.
 - Use `game.sim.probe(x, y)` / `game.sim.sampleLine(...)` to read data.
 
-Built-in tool kinds (for reference): `look`, `paint` (drag), `stamp` (tap), `custom`. Tools can have `opts` (a row of choices) and `sizes`.
+Built-in tool kinds (for reference): `look`, `paint` (drag), `stamp` (tap), `custom`. Tools can have `opts` (a row of choices, each with its own
+`help` and `cost` if it likes) and `sizes`.
 
 ---
 
 ## Lenses (views)
 
-The view button (and the V key) cycles through `game.lenses`.
+The view button opens a menu of `game.lenses` (each with its `desc`); the V key cycles through them.
 
 ```js
-game.lenses            // [{id, label, toast, lens, activate, deactivate}] built-ins first: "map", "soil", "moved", "flood"
-game.addLens({ id, label, toast, activate(game), deactivate(game) })   // appends; returns the lens (an existing id is refused with a warning)
+game.lenses            // [{id, label, toast, desc, legend, lens, activate, deactivate}] built-ins first: "map", "soil", "moved", "flood"
+game.addLens({ id, label, toast, desc, legend, activate(game), deactivate(game) })   // appends; returns the lens (an existing id is refused with a warning)
 game.setLens(idOrIndex)   // returns false if unknown; emits "lens"(id)
 game.nextLens()
 game.lensIdx, game.lensId // current lens position and id;  game.lens = the number the map renderer gets
@@ -286,7 +298,10 @@ game.lensIdx, game.lensId // current lens position and id;  game.lens = the numb
   0** and do their work through `game.extras` (for example the hydro lens sets `game.extras.flow`).
 - Order of events when the view changes: the old lens's `deactivate(game)`, the new `game.lens`, the new lens's `activate(game)`, then the `"lens"` event
   (the button label and highlight update from it, and the lens's `toast` is shown).
-- `label` is what the button shows (emoji + one or two words). `toast` is one or two short kid-friendly sentences explaining what the colours mean.
+- `label` is what the button shows (emoji + one or two words). `desc` is one line for the view menu. `toast` is one or two short kid-friendly
+  sentences explaining what the colours mean, shown when the view is picked if it has no `legend`.
+- `legend` is a colour key shown in a small box while the view is on: `{title, ramp: ['#css', ...low to high], left, right, note}` or
+  `{title, items: [['#css', 'words'], ...], note}`. `ui.legend(def)` shows one by hand (`null` hides it).
 
 ---
 
@@ -480,9 +495,7 @@ Differences from the first plan, and things that are easy to trip over:
 11. On a 360 px phone the cash chip and banner were wider than the screen; they now shrink (banner text is cut with an ellipsis) and the view chip row scrolls.
 12. The Settings card, the `?` shortcut card and module menu items are modal cards: the shortcut dispatcher ignores keys while any card is open.
 13. `ui.addButton`/`ui.panel` ids: if an element with that id already exists the button gets no `id` attribute (a warning is logged) but is still returned.
-14. **The core does not stop a storm when the land is rebuilt or reset.** `game.loadLevel` (menu "Change detail level") keeps `game.storm`, so the old storm
-    steps on the new land and its report compares two lands of different sizes; `game.resetMap` ("Start the ranch over", or "Free play" / "Story" from the
-    menu during a storm) resets the land under it, and the story's "before" storm then cannot start. The settings module drops the storm in both cases
-    (see [Events](#events)).
+14. **A storm is dropped when the land is rebuilt or reset** (`game.loadLevel`, `game.resetMap` call `game.dropStorm`). Before, the old storm kept
+    stepping on the new land and its report compared two lands of different sizes, and the story's "before" storm could not start.
 15. **Errors the game loop catches** go to `game.cbs.error`. Without the settings module that is the big "Something went wrong" card (at most every 10 s);
     with it, the calm notice (at most once a minute, with "Copy details").

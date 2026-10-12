@@ -6,7 +6,7 @@
   --shadow: 0 1px 2px rgba(40,28,16,.14), 0 4px 14px rgba(40,28,16,.16);
   --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --serif: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
   --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
-  --tray: 148px;                                   /* room the tool tray takes at the bottom of a phone */
+  --tray: calc(148px + var(--safe-b));             /* from the bottom of the screen to the top of the tool tray (ui.js measures it) */
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: #e9dfc6; overflow: hidden; overscroll-behavior: none; color: var(--ink);
@@ -109,18 +109,18 @@ button:disabled { cursor: default; }
 #stormProg .go { padding: 6px 10px; font-size: 12px; width: 100%; }
 
 /* ---- tips, toast, probe */
-#hint { position: absolute; left: 10px; right: 10px; bottom: calc(var(--tray) + 8px + var(--safe-b)); max-width: 470px; margin: 0 auto; background: var(--glass);
+#hint { position: absolute; left: 10px; right: 10px; bottom: calc(var(--tray) + 8px); max-width: 470px; margin: 0 auto; background: var(--glass);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-radius: 16px; padding: 11px 13px 7px; z-index: 6;
   box-shadow: var(--shadow); font-size: 14px; line-height: 1.42; font-family: var(--serif); border-left: 5px solid var(--gold); }
 #hint .row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; font-family: var(--ui); }
 #hint .row .go { padding: 6px 12px; font-size: 13px; }
 #hint .row .plain { font-size: 13px; padding: 6px 9px; }
 #hintHide { margin-left: auto; }
-#hintChip { position: absolute; left: 10px; bottom: calc(var(--tray) + 8px + var(--safe-b)); z-index: 6; font-size: 13px; padding: 7px 12px; }
+#hintChip { position: absolute; left: 10px; bottom: calc(var(--tray) + 8px); z-index: 6; font-size: 13px; padding: 7px 12px; }
 #probe { position: absolute; z-index: 9; background: rgba(43,31,20,.93); color: #fff6e6; border-radius: 12px; padding: 8px 11px; font-size: 12.5px; line-height: 1.45; pointer-events: none; max-width: 270px;
   box-shadow: 0 4px 14px rgba(0,0,0,.25); }
 #probe b { font-size: 13px; }
-#toast { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--tray) + 12px + var(--safe-b)); background: rgba(43,31,20,.93); color: #fff6e6; padding: 9px 16px;
+#toast { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--tray) + 12px); background: rgba(43,31,20,.93); color: #fff6e6; padding: 9px 16px;
   border-radius: 999px; font-size: 14px; pointer-events: none; z-index: 11; max-width: calc(100vw - 24px); text-align: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 
 /* ---- the tool tray */
@@ -150,11 +150,9 @@ button:disabled { cursor: default; }
 #btnUndo.dim { opacity: .5; }
 /* On wide screens the tray is centred and is at least half the screen, but grows up to 820 px so tools added by modules still fit. */
 @media (min-width: 800px) {
-  :root { --tray: 132px; }
+  :root { --tray: 140px; }
   #toolbar { left: 50%; right: auto; transform: translateX(-50%); width: max-content; min-width: min(56vw, 820px); max-width: min(820px, calc(100vw - 16px)); border-radius: 18px; bottom: 8px; }
-  #hint { bottom: calc(var(--tray) + 14px); }
   #hintChip { bottom: 14px; left: 14px; }
-  #toast { bottom: calc(var(--tray) + 18px); }
 }
 
 /* ---- map labels */
@@ -219,8 +217,8 @@ button:disabled { cursor: default; }
 .panel .pbody { padding: 4px 12px 12px; }
 .panel.corner-tl { left: 10px; top: calc(144px + var(--safe-t)); }
 .panel.corner-tr { right: 10px; top: calc(262px + var(--safe-t)); }
-.panel.corner-bl { left: 10px; bottom: calc(var(--tray) + 12px + var(--safe-b)); }
-.panel.corner-br { right: 10px; bottom: calc(var(--tray) + 12px + var(--safe-b)); }
+.panel.corner-bl { left: 10px; bottom: calc(var(--tray) + 12px); }
+.panel.corner-br { right: 10px; bottom: calc(var(--tray) + 12px); }
 .panel.corner-center { left: 50%; top: 50%; transform: translate(-50%, -50%); }
 
 /* ---- the Settings card (ui.addSetting) */

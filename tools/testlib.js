@@ -9,6 +9,7 @@
      opts.root      folder to serve (default: the repo root). Any folder with an index.html works, e.g. a git
                     export of an older commit, so you can compare before/after.
      opts.query     address query. A string ("level=3&quick=1") or an object ({level:3, quick:1, mods:"a,b"}).
+                    tour=0 is added unless the query names tour (the coach module's first-run tour would cover the page).
                     Default: "level=3&quick=1&free=1" (4 m cells, short storms, skip the title card).
      opts.viewport  {width, height}. Default 1280x800. (Phone: {width:360, height:740}.)
      opts.touch     true = emulate a touch screen (hasTouch + isMobile).
@@ -92,6 +93,7 @@ function toQuery(q) {
   if (q == null) q = DEFAULT_QUERY;
   if (typeof q === 'object') q = Object.keys(q).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(q[k])).join('&');
   q = String(q).replace(/^\?/, '');
+  if (!/(^|&)tour=/.test(q)) q += (q ? '&' : '') + 'tour=0';      // the coach module's first-run tour would cover the screen: tests ask for it with tour=1
   return q ? '?' + q : '';
 }
 

@@ -483,8 +483,8 @@
     id: 'save',
     init: function (g, u) {
       game = g; ui = u; css();
-      ui.addMenuItem({ label: 'Save game', onClick: () => openCard('save') });
-      ui.addMenuItem({ label: 'Load game', onClick: () => openCard('load') });
+      ui.addMenuItem({ label: '💾 Save game', onClick: () => openCard('save') });
+      ui.addMenuItem({ label: '📂 Load game', onClick: () => openCard('load') });
       // changes that are worth keeping: a season, a storm (soon), the player's own edits (after a quiet spell)
       game.on('season', () => markChange(delays.event));
       game.on('stormEnd', () => markChange(delays.event));

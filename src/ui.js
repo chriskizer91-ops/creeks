@@ -85,7 +85,8 @@
   };
 
   ui.toast = function (msg) {
-    const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
+    const t = $('toast'), h = $('hint'); t.textContent = msg; t.classList.remove('hidden');
+    t.style.bottom = h.classList.contains('hidden') ? '' : 'calc(var(--tray) + ' + (h.offsetHeight + 16) + 'px)';    // above the tip card when it shows
     clearTimeout(ui._tt); ui._tt = setTimeout(() => t.classList.add('hidden'), 2800);
   };
 
@@ -197,6 +198,8 @@
     const g = ui.game, a = $('app').getBoundingClientRect(), tb = $('toolbar').getBoundingClientRect(), row = $('topbar2').getBoundingClientRect();
     const wide = a.width >= 800;
     g.insets = { top: wide ? 12 : Math.max(0, row.bottom - a.top), bottom: Math.max(0, a.bottom - tb.top) + 6, left: 0, right: 0 };
+    const tray = Math.round(Math.max(0, a.bottom - tb.top)) + 'px';             // the tips, toasts and low panels sit just above the tray, whatever it holds
+    if (tray !== ui._tray && tb.height > 0) { ui._tray = tray; document.documentElement.style.setProperty('--tray', tray); }
   };
   /** Back to the whole ranch (the 3D view frames it its own way). */
   ui.fit = function () { const g = ui.game; if (!g.ready) return; if (g.provider()) g.focusOn(C.mapW / 2, C.mapH / 2, g.fitScale); else g.fitCamera(); };
@@ -272,6 +275,7 @@
       });
     } else vb.classList.add('hidden');
     ui.buildSizes();
+    requestAnimationFrame(() => ui.measureInsets());      // the tray grows with a row of choices
     const d = g.cur(), help = $('toolHelp');
     help.innerHTML = (d.help ? esc(d.help) : '') + (d.cost ? ' <span class="cost">' + esc(d.cost.charAt(0).toUpperCase() + d.cost.slice(1)) + '</span>' : '') +
       (!g.canUse(g.tool) ? ' <span class="cost">' + esc(g.whyLocked(g.tool)) + '</span>' : '');
