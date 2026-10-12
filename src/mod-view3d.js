@@ -589,8 +589,17 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     else if (V.tzDirty && now - V.tzT > 150) { V.tzDirty = false; V.tzT = now; try { V.tzGoal = game.sim.probe(V.tx, V.ty).h; } catch (e) { /* keep the estimate */ } }   // settled: ask the engine for the real height
     if (Math.abs(V.tzGoal - V.tz) > 1e-3) { V.tz += (V.tzGoal - V.tz) * (1 - Math.exp(-dt / 0.12)); V.stamp++; }
     if (elCompass && compassAz !== V.az) { compassAz = V.az; elCompass.firstChild.style.transform = 'rotate(' + (-V.az * 180 / Math.PI).toFixed(1) + 'deg)'; }
-    if (panel) panel.el.classList.toggle('v3-low', !!game.storm);   // on a narrow screen the strip moves down while the storm box is showing
+    if (panel) placeStrip();
     game.cam.x = V.tx; game.cam.y = V.ty; game.cam.scale = clamp(scaleFromDist(V.dist), game.fitScale * 0.8, 30);
+  }
+
+  /** On a narrow screen the controls are a strip down the right edge, just under the storm box (which grows while a storm runs). */
+  let stripTop = '';
+  function placeStrip() {
+    const sb = document.getElementById('stormbar'), narrow = window.innerWidth < 1180;
+    let top = '';
+    if (narrow && sb) { const a = document.getElementById('app').getBoundingClientRect(); top = Math.round(sb.getBoundingClientRect().bottom - a.top + 8) + 'px'; }
+    if (top !== stripTop) { stripTop = top; panel.el.style.top = top; }
   }
 
   // ---------------------------------------------------------------- entering and leaving
@@ -653,10 +662,9 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
 .v3-slide b { min-width:30px; text-align:right; font-variant-numeric:tabular-nums; }
 .v3-home { display:none; }
 /* Narrower screens: the tip card spans the bottom of the map there, so the controls become a slim strip down the right edge,
-   below the storm buttons (and below the storm box while a storm runs). Heights stay in the Settings card. */
+   just below the storm box (placeStrip follows it as it grows during a storm). Heights stay in the Settings card. */
 @media (max-width: 1179px) {
-  .panel.corner-br[data-panel="view3d"] { top:calc(200px + var(--safe-t)); bottom:auto; right:6px; width:auto; max-height:none; overflow:visible; }
-  .panel.corner-br[data-panel="view3d"].v3-low { top:calc(310px + var(--safe-t)); }
+  .panel.corner-br[data-panel="view3d"] { top:calc(248px + var(--safe-t)); bottom:auto; right:10px; width:auto; max-height:none; overflow:visible; }
   .panel[data-panel="view3d"] .phead, .panel[data-panel="view3d"] .v3-slide { display:none; }
   .panel[data-panel="view3d"] .pbody { padding:6px; }
   .panel[data-panel="view3d"] .v3-row { flex-direction:column; }
