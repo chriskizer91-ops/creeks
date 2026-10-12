@@ -10,6 +10,8 @@ The water runs on the graphics chip (shallow-water "virtual pipes" with Manning 
 slumping held by roots). The valley view is a reduced-complexity fluvial geomorphology model (compound-channel hydraulics,
 Meyer-Peter and Muller bedload, bank retreat and mass failure, meander migration and cutoffs, channel-evolution stages).
 
+![The ranch map before (left) and after (right) the polish pass](docs/before-after.jpg)
+
 ## Play
 
 Serve the folder with any static web host and open `index.html`, for example:
