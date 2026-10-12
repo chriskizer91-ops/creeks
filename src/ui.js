@@ -61,7 +61,9 @@
       card.innerHTML = (o.img ? '<img class="pic' + (o.square ? ' square' : '') + '" alt="">' : '') +
         '<div class="over">' + (o.cls === 'title' ? '<h1></h1>' : '<h2></h2>') + '<p class="t"></p>' + (o.html || '') + '<div class="btns"></div></div>';
       if (o.img) {
-        const im = card.querySelector('img'), list = [].concat(o.img); let k = 0;
+        let list = [].concat(o.img); let k = 0;
+        if (Creek.ASSETS) { const have = list.filter((p) => Creek.ASSETS[p]); if (have.length) list = have; }     // single-file build: skip slots with no picture inside the page
+        const im = card.querySelector('img');
         im.onerror = () => { k++; if (k < list.length) im.src = Creek.asset(list[k]); else im.removeAttribute('src'); };
         im.src = Creek.asset(list[0]);
       }
