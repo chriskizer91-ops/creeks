@@ -7,7 +7,8 @@
    - a "diorama" skirt around the edge shows dark soil over pale limestone, so bank height and soil depth read at a glance
    - touching the 3D land works because the land is drawn once more into a 1-pixel target that writes the world position under your finger
    One finger / the left mouse button stays the current tool, exactly as on the flat map.
-   Everything a module may call is on Creek.view3d (isActive, enter, exit, toggle) plus a few helpers for tests. */
+   Keys: D switches between the flat map and 3D; Q / E or the left / right arrows turn; the up / down arrows tilt.
+   Everything a module may call is on Creek.view3d (isActive, enter, exit, toggle, isIdle) plus a few helpers for tests. */
 (function () {
   'use strict';
   const C = Creek.CONFIG, GL = Creek.GLSL, DEG = Math.PI / 180;
@@ -286,7 +287,7 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     T.nVis = cnt; T.order.subarray(0, cnt).sort(byDistance);                                       // nearest first, so hidden land is never shaded (the depth test throws it out early)
   }
   const byDistance = (a, b) => T.dist[a] - T.dist[b];
-  function lodStep(l) { const s = Math.max(0.5, +Creek.settings.get('mesh', 2) || 2), q0 = Math.max(4, Math.round(TILE / s)); return TILE / Math.max(2, q0 >> l); }
+  function lodStep(l) { const s = Math.max(0.5, +Creek.settings.get('view3d.mesh', 2) || 2), q0 = Math.max(4, Math.round(TILE / s)); return TILE / Math.max(2, q0 >> l); }
   const extrusionScale = () => 0.4 + 0.3 * V.vex;
 
   // ---------------------------------------------------------------- GL objects
@@ -297,11 +298,13 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     build(gl);
   }
   function build(gl) {
-    const S = Creek.Shade, mk = (v, f, n) => new S.Program(gl, v, f, n);
-    L.progs = {
-      land: mk(VS_LAND(false), FS_LAND, '3d land'), water: mk(VS_LAND(true), FS_WATER, '3d water'), pick: mk(VS_LAND(false), FS_PICK, '3d pick'),
-      wall: mk(VS_WALL, FS_WALL, '3d wall'), sky: mk(VS_SCREEN, FS_SKY, '3d sky'), rain: mk(VS_SCREEN, FS_RAIN, '3d rain'), copy: mk(VS_SCREEN, FS_COPY, '3d copy')
-    };
+    const S = Creek.Shade, made = [], mk = (v, f, n) => { const p = new S.Program(gl, v, f, n); made.push(p); return p; };
+    try {
+      L.progs = {
+        land: mk(VS_LAND(false), FS_LAND, '3d land'), water: mk(VS_LAND(true), FS_WATER, '3d water'), pick: mk(VS_LAND(false), FS_PICK, '3d pick'),
+        wall: mk(VS_WALL, FS_WALL, '3d wall'), sky: mk(VS_SCREEN, FS_SKY, '3d sky'), rain: mk(VS_SCREEN, FS_RAIN, '3d rain'), copy: mk(VS_SCREEN, FS_COPY, '3d copy')
+      };
+    } catch (e) { made.forEach((p) => p.dispose()); throw e; }      // one shader would not build: give back the ones that did (every retry would leak them)
     try {                                                           // a 1-pixel float target that the picking pass draws into
       L.pickTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, L.pickTex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
@@ -384,6 +387,7 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
   function drawFrame(g, s) {
     const gl = g.gl; if (gl.isContextLost() || L.lost || !T.lod) return;
     ensureGL(gl);
+    if (s.dpr == null) s.dpr = g.dpr;                                // the real pixel ratio (lower than the screen's when Sharpness is below 1), for the rain streaks
     const W = s.width, Hh = s.height, vex = V.vex, exs = extrusionScale(), pr = L.progs, S = Creek.Shade;
     prep(W, Hh);
     const e = V.eye, wx = (s.extras && s.extras.weather) || { rain: 0, flash: 0 };
@@ -473,6 +477,7 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     drawTiles(gl, pk, true);
     gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, L.pickBuf);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.disable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, Hh);                                       // picking runs between frames (a finger moving): leave the screen's viewport, not this 1 x 1 one
     const b = L.pickBuf; return b[3] > 0.5 ? { x: b[0], y: b[1], h: b[2] } : null;
   }
 
@@ -554,15 +559,23 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     V.tx = x; V.ty = y; clampTarget(); if (scale) V.dist = clamp(distFromScale(scale), DMIN, DMAX);
     V.tz = V.tzGoal = heightAt(V.tx, V.ty); V.tzDirty = true; touch();
   }
-  function resetView() {
-    V.az = V.azT = 0; V.pitch = V.pitchT = 55 * DEG; setVex(3);
+  /** The whole ranch in view, from the angle you are looking now (what game.fitCamera does on the flat map). */
+  function frameAll() {
     V.tx = C.mapW / 2; V.ty = C.mapH / 2; V.dist = clamp(distFromScale(game.fitScale), DMIN, DMAX); V.tz = V.tzGoal = heightAt(V.tx, V.ty); V.tzDirty = true; touch();
   }
+  function resetView() { V.az = V.azT = 0; V.pitch = V.pitchT = 55 * DEG; setVex(3); frameAll(); }
   function setVex(v) {
-    V.vex = clamp(+v || 3, 1, 8); Creek.settings.set('view3d.vex', V.vex);
+    V.vex = clamp(+v || 3, 1, 8); Creek.settings.set('view3d.vex', V.vex);       // the Settings card and the slider share this value
     if (elVex) { elVex.value = V.vex; elVexLabel.textContent = '×' + (+V.vex).toFixed(V.vex % 1 ? 1 : 0); }
     touch();
   }
+  /** Nothing in the 3D view is moving by itself (no easing, no drag): the settings module may then draw fewer pictures. */
+  function isIdle() {
+    if (!P.active) return true;
+    return V.az === V.azT && V.pitch === V.pitchT && Math.abs(V.tzGoal - V.tz) <= 1e-3 && !shiftPan && performance.now() - V.movedT > 300;
+  }
+  /** The valley view (river module) covers the map: the 3D keys must not turn a camera nobody can see. */
+  const riverOpen = () => !!(Creek.river && Creek.river.isOpen && Creek.river.isOpen());
 
   /** Every frame, before drawing: ease the camera, follow the ground height, keep the flat map's camera in step (so the contour spacing and brush follow the zoom). */
   function frame(dt) {
@@ -576,6 +589,7 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     else if (V.tzDirty && now - V.tzT > 150) { V.tzDirty = false; V.tzT = now; try { V.tzGoal = game.sim.probe(V.tx, V.ty).h; } catch (e) { /* keep the estimate */ } }   // settled: ask the engine for the real height
     if (Math.abs(V.tzGoal - V.tz) > 1e-3) { V.tz += (V.tzGoal - V.tz) * (1 - Math.exp(-dt / 0.12)); V.stamp++; }
     if (elCompass && compassAz !== V.az) { compassAz = V.az; elCompass.firstChild.style.transform = 'rotate(' + (-V.az * 180 / Math.PI).toFixed(1) + 'deg)'; }
+    if (panel) panel.el.classList.toggle('v3-low', !!game.storm);   // on a narrow screen the strip moves down while the storm box is showing
     game.cam.x = V.tx; game.cam.y = V.ty; game.cam.scale = clamp(scaleFromDist(V.dist), game.fitScale * 0.8, 30);
   }
 
@@ -604,7 +618,7 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
 
   // ---------------------------------------------------------------- the module
   Creek.view3d = {
-    isActive() { return !!P.active && game && game.provider() === P; }, enter, exit, toggle,
+    isActive() { return !!(P.active && game && game.provider() === P); }, enter, exit, toggle, isIdle,
     // for tests and tools
     camera() { return { x: V.tx, y: V.ty, z: V.tz, az: V.az, pitch: V.pitch, dist: V.dist, vex: V.vex, eye: V.eye.slice(), near: V.near, far: V.far }; },
     setCamera(o) {
@@ -637,6 +651,19 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
 .v3-slide { font-size:13px; }
 .v3-slide input { flex:1; min-width:0; height:36px; accent-color:var(--moss); }
 .v3-slide b { min-width:30px; text-align:right; font-variant-numeric:tabular-nums; }
+.v3-home { display:none; }
+/* Narrower screens: the tip card spans the bottom of the map there, so the controls become a slim strip down the right edge,
+   below the storm buttons (and below the storm box while a storm runs). Heights stay in the Settings card. */
+@media (max-width: 1179px) {
+  .panel.corner-br[data-panel="view3d"] { top:calc(200px + var(--safe-t)); bottom:auto; right:6px; width:auto; max-height:none; overflow:visible; }
+  .panel.corner-br[data-panel="view3d"].v3-low { top:calc(310px + var(--safe-t)); }
+  .panel[data-panel="view3d"] .phead, .panel[data-panel="view3d"] .v3-slide { display:none; }
+  .panel[data-panel="view3d"] .pbody { padding:6px; }
+  .panel[data-panel="view3d"] .v3-row { flex-direction:column; }
+  .panel[data-panel="view3d"] .v3-b { flex:0 0 auto; width:40px; }
+  .panel[data-panel="view3d"] .v3-home { display:block; }
+}
+@media (max-width: 639px) { .panel[data-panel="view3d"] .v3-home { display:none; } }
 `);
       panel = ui.panel({ id: 'view3d', title: '3D view', corner: 'br', closable: false });
       const guarded = (label, fn) => () => g._guard('3D button ' + label, fn);
@@ -647,28 +674,42 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
       const mkb = (txt, label, fn, cls) => { const b = document.createElement('button'); b.className = 'v3-b' + (cls ? ' ' + cls : ''); b.textContent = txt; b.title = label; b.setAttribute('aria-label', label); b.onclick = guarded(label, fn); return b; };
       row1.appendChild(mkb('⟲', 'Turn left', () => turn(-15 * DEG))); row1.appendChild(mkb('⟳', 'Turn right', () => turn(15 * DEG)));
       row1.appendChild(mkb('⤒', 'Tilt up (look from higher)', () => tilt(8 * DEG))); row1.appendChild(mkb('⤓', 'Tilt down (look from lower)', () => tilt(-8 * DEG)));
+      row1.appendChild(mkb('⌂', 'Reset the view', resetView, 'v3-home'));
       const row2 = document.createElement('div'); row2.className = 'v3-row v3-slide'; row2.title = 'Higher numbers make hills and banks look taller.';
       const lab = document.createElement('span'); lab.textContent = 'Heights';
       elVex = document.createElement('input'); elVex.type = 'range'; elVex.min = 1; elVex.max = 8; elVex.step = 0.5; elVex.value = V.vex; elVex.setAttribute('aria-label', 'Heights: how much taller the hills are drawn');
       elVexLabel = document.createElement('b'); elVexLabel.textContent = '×' + V.vex;
       elVex.oninput = () => g._guard('3D heights', () => setVex(+elVex.value));
+      // a slider keeps the keyboard focus after a mouse or finger lets go, and keys are ignored while a slider has it (Q, E and the arrows would stop working)
+      let slidByPointer = false;
+      elVex.addEventListener('pointerdown', () => { slidByPointer = true; });
+      elVex.addEventListener('change', () => { if (slidByPointer) { slidByPointer = false; elVex.blur(); } });
       row2.appendChild(lab); row2.appendChild(elVex); row2.appendChild(elVexLabel); row2.appendChild(mkb('Reset view', 'Reset the view', resetView, 'wide'));
       panel.body.appendChild(row1); panel.body.appendChild(row2);
 
-      btn = ui.addButton({ slot: 'view', id: 'view3d', label: '3D', title: 'Look at the ranch in 3D (G)', toggle: true, onClick: (on) => { if (on) { if (!enter()) sync(); } else exit(); } });
-      const kb = (key, desc, fn) => Creek.shortcuts.add({ key, desc, repeat: key !== 'g', fn: () => { if (key !== 'g' && !P.active) return false; if (!game.ready) return false; fn(); } });
-      kb('g', 'Flat map or 3D view', toggle);
-      kb('q', 'Turn the 3D view left', () => turn(-12 * DEG)); kb('e', 'Turn the 3D view right', () => turn(12 * DEG));
-      kb('r', 'Tilt the 3D view up (look from higher)', () => tilt(6 * DEG)); kb('f', 'Tilt the 3D view down (look from lower)', () => tilt(-6 * DEG));
-      ui.addSetting({ id: 'mesh', label: '3D detail', help: 'Finer 3D land looks smoother but needs a stronger graphics chip.', type: 'choice', default: 2, options: [{ value: 4, label: 'Light' }, { value: 2, label: 'Normal' }, { value: 1, label: 'Fine' }] });
-      Creek.settings.on('mesh', () => { V.stamp++; });
+      btn = ui.addButton({ slot: 'view', id: 'view3d', label: '3D', title: 'Look at the ranch in 3D (D)', toggle: true, onClick: (on) => { if (on) { if (!enter()) sync(); } else exit(); } });
+      // Keys: D switches; Q / E or the left / right arrows turn; the up / down arrows tilt (G, R and F belong to the storm graph, the
+      // valley view and fast-forward). Turning and tilting only work while the 3D view shows, otherwise the key is passed on.
+      // Nothing works while the valley view covers the map.
+      Creek.shortcuts.add({ key: 'd', desc: 'Flat map or 3D view', fn: () => { if (!game.ready || riverOpen()) return false; toggle(); } });
+      const kb = (key, desc, fn, hidden) => Creek.shortcuts.add({ key, desc, hidden: !!hidden, repeat: true, fn: () => { if (!P.active || !game.ready || riverOpen()) return false; fn(); } });
+      kb('q', 'Turn the 3D view left (or ←)', () => turn(-12 * DEG)); kb('e', 'Turn the 3D view right (or →)', () => turn(12 * DEG));
+      kb('ArrowLeft', 'Turn the 3D view left', () => turn(-12 * DEG), true); kb('ArrowRight', 'Turn the 3D view right', () => turn(12 * DEG), true);
+      kb('ArrowUp', 'Tilt the 3D view up (look from higher)', () => tilt(6 * DEG)); kb('ArrowDown', 'Tilt the 3D view down (look from lower)', () => tilt(-6 * DEG));
+      ui.addSetting({ id: 'view3d.mesh', label: '3D detail', help: 'Finer 3D land looks smoother but needs a stronger graphics chip.', type: 'choice', default: 2, options: [{ value: 4, label: 'Light' }, { value: 2, label: 'Normal' }, { value: 1, label: 'Fine' }] });
+      Creek.settings.on('view3d.mesh', () => { V.stamp++; });
+      ui.addSetting({ id: 'view3d.vex', label: '3D heights', help: 'How much taller hills and banks look in the 3D view. 1 is real size.', type: 'slider', min: 1, max: 8, step: 0.5, get: () => V.vex, set: (v) => setVex(v) });
 
       g.setViewProvider(P);
       g.on('frame', (dt) => frame(dt));
       g.on('terrain', () => { V.tzDirty = true; V.tzT = 0; });
       g.on('stormStart', () => { hasWater = true; });
       const dry = () => { hasWater = false; lastStep = g.sim ? g.sim.stepCount : -1; };
-      g.on('season', dry); g.on('reset', dry);
+      g.on('season', dry); g.on('reset', dry); g.on('loaded', dry);                // each of these drains the water off the land
+      // "show the whole ranch" (free play or the story starting, a new detail level) means the same in 3D; without this the
+      // 3D camera, which the flat camera follows every frame, would undo it straight away
+      const fit0 = g.fitCamera;
+      g.fitCamera = function () { const r = fit0.apply(this, arguments); if (P.active && T.lod) g._guard('3D fit', frameAll); return r; };
       // shift + left button drags the land around (the game itself only pans with the middle button)
       const cv = g.canvas;
       cv.addEventListener('pointerdown', (e) => {

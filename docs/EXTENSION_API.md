@@ -131,6 +131,13 @@ A listener that throws is logged (`[creek] a "name" listener threw`) and skipped
 | `"reset"` | none | "Start the ranch over", or free play / story starting (`game.resetMap`); a `"terrain"` event follows |
 | `"cash"` | `amount` | money changed (a new balance, in dollars) |
 | `"lens"` | `id` | the view changed |
+| `"saved"` | `{slot, meta}` | (save module) a save was written; `slot` is `"auto"`, `"slot1"`... |
+| `"loaded"` | `{slot, meta}` | (save module) a save was put back; module state from `registerState` is already loaded, `"terrain"` came just before. The water was drained |
+
+A storm that is running when the land is rebuilt or started over (a new detail level, the graphics chip coming back, `game.resetMap`: "Start the ranch
+over", free play or the story starting) is dropped by the settings module without a `"stormEnd"`: `game.storm` becomes `null` and the storm box closes.
+A `"reset"` always follows (free play after a level change; after a graphics loss, a reset and then the save is put back). Without the settings module
+the core keeps the old storm running on the new land (see [Notes and gotchas](#notes-and-gotchas) 14).
 
 ### Payload details
 
@@ -186,6 +193,9 @@ Creek.shortcuts.list();   // [{key, label, desc}] of the non-hidden ones, in the
   card is open (`Creek.shortcuts.isBlocked()`), and auto-repeats unless `repeat: true`.
 - Built in: **1 to 9** pick the 1st to 9th tool in the tray (`Creek.TOOLS` order, so module tools count), **Z** undo, **L** contour lines, **V** next view,
   **?** the shortcut list.
+- Taken by modules (pick a free key for a new one): **Space** pause and **F** fast-forward (settings, only during a storm), **S** quick save (save),
+  **D** flat map or 3D, **Q / E** and **← / →** turn, **↑ / ↓** tilt (view3d; turning and tilting only while the 3D view shows), **T** trace, **X** section,
+  **W** water paths (hydro), **G** storm graph (stormgraph), **H** ranch health (life), **R** valley view and **Escape** back (river), **Escape** skip the tour (coach).
 
 ---
 
@@ -388,8 +398,14 @@ Things the game keeps: `game.cash`, `game.ledger`, `game.season`, `game.year`, `
 So modules can use each other **optionally**: always feature-detect, never require.
 
 - tools `"trace"` and `"section"`, lens `"flow"`: hydro
-- `Creek.view3d = {isActive(), enter(), exit(), toggle()}`: view3d
-- `Creek.save = {hasAuto(), save(slot), load(slot), list(), extraState(fn)}`: save
+- `Creek.view3d = {isActive(), enter(), exit(), toggle(), isIdle()}`: view3d. `isIdle()` is true when nothing in the 3D view is moving by itself
+  (the settings module then lets it rest). Its settings keys are `view3d.vex` (heights, 1 to 8) and `view3d.mesh` (3D detail)
+- `Creek.save = {hasAuto(), save(slot, opts), load(slot, opts), list(), remove(slot), extraState(fn), quickSave(), current(), isBusy()}`: save.
+  Slots are `"auto"`, `"slot1"`, `"slot2"`, `"slot3"`. `save`/`load` never reject; they resolve `{ok, code, message}`. `opts`: `silent` (no toast),
+  `quiet` (no full-screen loading bar), `onProgress(text, 0..1)`. `current()` is the slot holding the newest copy of the ranch being played (saved or
+  loaded since it was started), or `null`. The save module also emits the game events `"saved"` and `"loaded"`
+- `Creek.perf = {wake(ms), reduceMotion(), notice({title, text, detail, buttons, sticky}), levelOk(level), isResting(), drawCount(), report(msg, stack)}`:
+  settings (see [Pause, fast-forward, frame gate](#pause-fast-forward-frame-gate))
 - `Creek.stormgraph`: stormgraph
 - `Creek.audio`: audio
 - `Creek.life = {score(), check(), postcards()}` and `Creek.neighbors = {state(), factor()}`: life
@@ -407,6 +423,14 @@ Example: `if (Creek.view3d && Creek.view3d.isActive()) { ... }`; `if (game.lense
 - `game.fast = true` is fast-forward: the per-frame step budget is bigger (the adaptive steps-per-frame cap rises from 70 to 220 and it aims for a longer frame, like a turbo storm),
   and **during a storm only every 3rd frame is drawn**. The existing adaptive steps-per-frame behaviour is otherwise unchanged.
 - `game.frameGate = (game, dt) => boolean`: return `false` to skip drawing this frame (for example to throttle a heavy view). `undefined`/`true` draw. A throw is logged and treated as "draw".
+  It is one plain slot: it reads back exactly what was put in it. To add your own gate on top of another module's, keep the old one and call it from yours
+  (`const prev = game.frameGate; game.frameGate = (g, dt) => (prev && prev(g, dt) === false) ? false : mine(g, dt);`) and put `prev` back when you are done.
+- **Resting** (settings module): when nothing is happening the game draws about 8 pictures a second instead of 60 (about 20 while slow things move: water
+  standing after a storm, flow lines, the trace, a highlighted contour), and none while the page is hidden. The rule is applied inside `game.draw` (it wraps the
+  prototype's `draw`), after `frameGate`, and never touches the `frameGate` slot. It counts as "something happening": a storm, a stroke, fingers or the mouse
+  on the page, keys, a hint marker, the camera moving (also from code), a change of land, view, contour lines, overlay (`game.extras.flow/trace/section`) or
+  view provider, and the 3D view while `Creek.view3d.isIdle()` is false. Any other view provider is drawn every frame. If your module animates something
+  else on the map, call `Creek.perf.wake(ms)` (keeps every frame drawn for `ms`, default 1500) while it moves.
 - `?quick=1` makes storms short for testing: `Creek.CONFIG.stormBurst = 150`, `stormTail = 90` (instead of 1800 and 1200), applied at start-up.
 
 ---
@@ -456,3 +480,9 @@ Differences from the first plan, and things that are easy to trip over:
 11. On a 360 px phone the cash chip and banner were wider than the screen; they now shrink (banner text is cut with an ellipsis) and the view chip row scrolls.
 12. The Settings card, the `?` shortcut card and module menu items are modal cards: the shortcut dispatcher ignores keys while any card is open.
 13. `ui.addButton`/`ui.panel` ids: if an element with that id already exists the button gets no `id` attribute (a warning is logged) but is still returned.
+14. **The core does not stop a storm when the land is rebuilt or reset.** `game.loadLevel` (menu "Change detail level") keeps `game.storm`, so the old storm
+    steps on the new land and its report compares two lands of different sizes; `game.resetMap` ("Start the ranch over", or "Free play" / "Story" from the
+    menu during a storm) resets the land under it, and the story's "before" storm then cannot start. The settings module drops the storm in both cases
+    (see [Events](#events)).
+15. **Errors the game loop catches** go to `game.cbs.error`. Without the settings module that is the big "Something went wrong" card (at most every 10 s);
+    with it, the calm notice (at most once a minute, with "Copy details").

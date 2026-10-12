@@ -1,10 +1,14 @@
 /* Settings, speed and safety nets. Module id "settings". Exposes Creek.perf.
    - Settings card rows: Detail level, Sharpness, Reduce motion, Show frame rate, Fast storms.
-   - Pause and fast-forward buttons that appear inside the storm box while a storm runs (keys Space and F; S is quick save).
-   - Resting: with nothing happening the map is drawn about 8 times a second instead of 60, and not at all while the page is hidden.
-   - If the graphics chip is taken away (WebGL context lost) the ranch is rebuilt and the last autosave is put back.
-   - A memory guard that picks a lighter detail level when a device cannot hold the finest one.
-   - One calm, dismissible card when the game hits an unexpected error, at most once a minute, with a "Copy details" button.
+   - Pause and fast-forward buttons that appear inside the storm box while a storm runs (keys Space and F).
+   - Resting: with nothing happening the map is drawn about 8 times a second instead of 60 (20 while slow things move: ripples on
+     standing water, flow lines, a pulsing ring), and not at all while the page is hidden. The rule sits inside game.draw, after
+     game.frameGate, so that slot stays free for other modules.
+   - If the graphics chip is taken away (WebGL context lost) the ranch is rebuilt and its newest save (Creek.save.current()) is put back.
+   - A memory guard that picks a lighter detail level when a device cannot hold the finest one. A storm running when the land is
+     rebuilt or started over (new detail level, graphics chip back, "Start the ranch over") is dropped: it belongs to the old land.
+   - One calm, dismissible card when the game hits an unexpected error (also the ones the game loop catches), at most once a minute,
+     with a "Copy details" button.
    Other code can use: Creek.perf.wake(ms) (keep drawing at full speed for a while), Creek.perf.reduceMotion(),
    Creek.perf.notice({...}) (a small card that does not block the game), Creek.perf.levelOk(level). */
 (function () {
@@ -111,7 +115,10 @@
     init: function (g, u) {
       game = g; ui = u;
       styles();
+      // errors the game loop catches would otherwise open the big blocking "Something went wrong" card every 10 seconds
+      guard('error card', () => { game.cbs.error = (e) => onProblem(e && e.message ? e.message : e, e && e.stack); });
       guard('memory guard', memoryGuard);
+      guard('storm guard', stormGuard);
       guard('sharpness', sharpness);
       guard('rows', rows);
       guard('motion', motion);
@@ -139,6 +146,26 @@
       '.reduce-motion *,.reduce-motion *::before,.reduce-motion *::after{transition:none !important;animation:none !important}');
   }
 
+  // ---------------------------------------------------------------- a storm that cannot go on
+  /** End a running storm without a report: its land is going away (a new detail level, a lost graphics chip). Without this the old
+      storm kept stepping on the new land and its report compared two lands of different sizes. Whoever rebuilds the land then
+      starts the ranch afresh (free play, or a reset before a save is put back), so modules hear "reset". Returns true if there was one. */
+  function dropStorm() {
+    const g = game; if (!g || !g.storm) return false;
+    g.storm = null; g.turbo = false; g.paused = false; g.fast = false;
+    if (g.weather) { g.weather.rain = 0; g.weather.flash = 0; }
+    if (ui) ui.stormEndHook = null;                // a story step waiting for this storm must not wake up after a later storm (it would reset the ranch)
+    guard('hide storm box', () => { $('stormProg').classList.add('hidden'); ui.lockStorms(false); });
+    syncChips();
+    return true;
+  }
+  /** Starting the ranch over (menu "Start the ranch over", "Free play" or "Story" in the middle of a storm) used to keep the storm running on
+      the fresh land, and the story's own "before" storm then refused to start. game.resetMap emits "reset" itself. */
+  function stormGuard() {
+    const reset0 = game.resetMap;
+    game.resetMap = function () { dropStorm(); return reset0.apply(this, arguments); };
+  }
+
   // ---------------------------------------------------------------- memory guard (a lighter detail level when the finest does not fit)
   function memoryGuard() {
     const origLoad = game.loadLevel, origCal = game.calibrate;
@@ -148,6 +175,7 @@
       notice({ title: 'Using a lighter detail level', text: 'This device is short on memory for ' + C.levels[from] + ' m cells, so the ranch is drawn with ' + C.levels[to] + ' m cells instead. Everything still works the same.' });
     };
     game.loadLevel = async function (L) {
+      dropStorm();                                                          // the storm belongs to the land that is about to go
       let lvl = L;
       while (lvl < LAST && !perf.levelOk(lvl)) lvl++;
       for (;;) {
@@ -239,59 +267,71 @@
     fast.onclick = () => guard('fast', () => { toggleFast(); });
     game.on('stormStart', () => { game.paused = false; game.fast = !!S().get('perf.fastStorms', false); sync(); });
     game.on('stormEnd', () => { game.paused = false; game.fast = false; sync(); });
+    game.on('frame', () => { if (game.storm) sync(); });         // another module (or a test) may pause too: keep the buttons honest (sync only writes on a change)
     S().on('perf.fastStorms', (v) => { if (game.storm) { game.fast = !!v; sync(); } });
     sync();
   }
   function togglePause() { if (!game.storm) return false; game.paused = !game.paused; syncChips(); perf.wake(); return true; }
   function toggleFast() { if (!game.storm) return false; game.fast = !game.fast; syncChips(); perf.wake(); return true; }
 
-  // ---------------------------------------------------------------- keys
+  // ---------------------------------------------------------------- keys (S for quick save belongs to the save module)
   function shortcuts() {
     const blurButton = () => { const a = document.activeElement; if (a && a !== document.body && a.blur && /^(BUTTON|CANVAS)$/.test(a.tagName)) a.blur(); };   // so Space does not also "press" a focused button
-    Creek.shortcuts.add({ key: 'space', desc: 'Pause or play the storm', fn: () => { blurButton(); return togglePause() ? undefined : false; } });
+    Creek.shortcuts.add({ key: 'space', desc: 'Pause or play the storm', fn: () => { if (!game.storm) return false; blurButton(); togglePause(); } });
     Creek.shortcuts.add({ key: 'f', desc: 'Fast-forward the storm', fn: () => (toggleFast() ? undefined : false) });
-    Creek.shortcuts.add({ key: 's', desc: 'Quick save', fn: () => {
-      if (!Creek.save || !game.ready) return false;
-      Creek.save.quickSave(); return undefined;
-    } });
   }
 
   // ---------------------------------------------------------------- resting (fewer pictures when nothing moves)
-  let lastActive = 0, lastDraw = 0, inGate = false, other = null, draws = 0, camSig = '';
+  // The rule sits inside game.draw, which the game calls only after game.frameGate said yes. It used to take over the frameGate
+  // slot itself, so the slot never read back what a module put in it (river's "put the old gate back" left a function behind, not
+  // null) and a module that saved and restored the gate wiped out a gate set before it. It wraps the prototype's draw, so a test or
+  // module that swaps game.draw for a while and then deletes its copy does not remove the rule with it.
+  let lastActive = 0, lastDraw = 0, draws = 0, wet = false;
+  const seen = { x: NaN, y: NaN, s: NaN, tv: NaN, vp: null, lens: NaN, cont: null, fl: null, tr: null, sec: null };
   function busy(g, now) {
     if (g.storm || g.stroke || g.activeHint || g.pointers.size || !g.ready) return true;
     if (now - lastActive < 1000 || now < wakeUntil) return true;
-    const vp = g.provider && g.provider();
-    if (vp && !(Creek.view3d && Creek.view3d.isIdle && Creek.view3d.isIdle())) return true;     // a 3D view may be moving on its own
+    const vp = g.provider && g.provider(), v3 = Creek.view3d;
+    if (vp && !(v3 && v3.isActive && v3.isActive() && v3.isIdle && v3.isIdle())) return true;   // the 3D view says when it is still; any other provider may be moving on its own
+    return false;
+  }
+  /** Milliseconds between pictures while resting: about 8 a second, or 20 while slow things move (ripples on standing water after a
+      storm, drifting flow lines, the pulsing trace or contour), which would look jerky at 8. Reduce motion stops the water and lines. */
+  function restGap(g) {
+    const x = g.extras || {}, slow = g.hiH != null || (!perf.reduceMotion() && (wet || !!x.flow || !!x.trace));
+    return slow ? 50 : 110;
+  }
+  function mayDraw(g) {
+    if (document.hidden) return false;
+    const now = performance.now();
+    if (busy(g, now) || now - lastDraw >= restGap(g) - 4) { lastDraw = now; return true; }    // (-4: frames come every 16.7 ms and jitter a little)
     return false;
   }
   function resting() {
     const touch = () => { lastActive = performance.now(); };
     ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'touchstart', 'touchmove', 'resize', 'orientationchange'].forEach((n) => window.addEventListener(n, touch, { capture: true, passive: true }));
-    ['terrain', 'lens', 'toolChanged', 'ready', 'cash', 'reset', 'stormStart', 'stormEnd', 'season', 'fieldUse'].forEach((n) => game.on(n, touch));
+    ['terrain', 'lens', 'toolChanged', 'ready', 'cash', 'reset', 'stormStart', 'stormEnd', 'season', 'fieldUse', 'loaded', 'river'].forEach((n) => game.on(n, touch));
+    game.on('stormStart', () => { wet = true; });
+    ['season', 'reset', 'ready', 'loaded'].forEach((n) => game.on(n, () => { wet = false; }));        // each of these drains the water off the land
     document.addEventListener('visibilitychange', () => { if (!document.hidden) touch(); });
-    game.on('frame', () => {                                                    // the camera moving on its own (zoom to a hint, focus on a spot)
-      const c = game.cam, sig = c.x.toFixed(1) + ',' + c.y.toFixed(1) + ',' + c.scale.toFixed(4) + ',' + game.terrainVersion;
-      if (sig !== camSig) { camSig = sig; touch(); }
+    // things that change the picture with no finger or key: the camera moving on its own (zoom to a hint, focus on a spot), the land,
+    // the view, the contour lines, a 3D view (or any provider) coming or going, a module's overlay arriving
+    game.on('frame', () => {
+      const g = game, c = g.cam, x = g.extras || {}, vp = g.provider ? g.provider() : null, o = seen;
+      if (c.x !== o.x || c.y !== o.y || c.scale !== o.s || g.terrainVersion !== o.tv || vp !== o.vp || g.lensIdx !== o.lens || g.contourOn !== o.cont ||
+          x.flow !== o.fl || x.trace !== o.tr || x.section !== o.sec) {
+        o.x = c.x; o.y = c.y; o.s = c.scale; o.tv = g.terrainVersion; o.vp = vp; o.lens = g.lensIdx; o.cont = g.contourOn; o.fl = x.flow; o.tr = x.trace; o.sec = x.section;
+        touch();
+      }
     });
-    const mine = (g) => {
-      if (document.hidden) return false;
-      const now = performance.now();
-      if (busy(g, now)) { lastDraw = now; return true; }
-      if (now - lastDraw < 110) return false;                                     // about 8 pictures a second
-      lastDraw = now; return true;
-    };
-    // game.frameGate is one slot; other modules may set it too. Whatever they set is asked after mine, so both rules apply.
-    const combined = function (g, dt) {
-      if (inGate) return true;
-      inGate = true;
-      try {
-        if (!mine(g)) return false;
-        if (other && other(g, dt) === false) return false;
-        draws++; return true;
-      } finally { inGate = false; }
-    };
-    Object.defineProperty(game, 'frameGate', { configurable: true, enumerable: true, get: () => combined, set: (fn) => { other = typeof fn === 'function' && fn !== combined ? fn : null; } });
+    const proto = Object.getPrototypeOf(game), draw0 = proto && proto.draw;
+    if (typeof draw0 === 'function' && !draw0._resting) {
+      const draw = function () {
+        if (this === game && !mayDraw(this)) return undefined;
+        draws++; return draw0.apply(this, arguments);
+      };
+      draw._resting = true; proto.draw = draw;
+    }
     perf.isResting = () => !busy(game, performance.now());
     perf.drawCount = () => draws;                                                   // pictures drawn so far (for the frame-rate readout and tests)
   }
@@ -321,10 +361,7 @@
     function markLost() {
       if (lost) return;
       lost = true; game.ready = false;
-      if (game.storm) {                                                        // the storm cannot go on: drop it quietly
-        game.storm = null; game.turbo = false; game.paused = false; game.fast = false;
-        guard('hide storm box', () => { $('stormProg').classList.add('hidden'); ui.lockStorms(false); });
-      }
+      dropStorm();                                                             // the storm cannot go on: its water lived on the chip
       note = notice({ title: 'The picture went to sleep', text: 'Your graphics chip needed a break. Hold on while the ranch is put back.', sticky: true });
       clearTimeout(timer);
       timer = setTimeout(() => { if (lost) notice({ title: 'Still waiting for the picture', text: 'It is taking a while. You can reload the game; your last autosave will still be there.', buttons: [{ label: 'Reload', primary: true, onClick: () => location.reload() }] }); }, 8000);
@@ -340,18 +377,25 @@
     async function recover() {
       if (recovering) return; recovering = true;
       try {
-        const gl = game.gl;
+        const gl = game.gl, wasStory = !!(ui && ui.mode === 'story');
+        // the newest save of THIS ranch (asked before the rebuild, which makes the save module forget it). An autosave left over from
+        // another visit is a different ranch: putting that back would swap the player's ranch for an old one.
+        const sv = Creek.save, slot = sv ? (sv.current ? sv.current() : (sv.hasAuto() ? 'auto' : null)) : null;
         gl.getExtension('EXT_color_buffer_float');
         if (Creek.Sim) Creek.Sim._shared = null;                               // the compiled shader programs died with the old context
         game.renderer = new Creek.Renderer(gl); patchRenderer(game);
         if (game.resetGLState) game.resetGLState();
+        game.sim = null;                                                       // its textures died with the old context (deleting them only makes the browser complain)
         await game.loadLevel(game.level);
         let back = false;
-        if (Creek.save && Creek.save.hasAuto()) { const r = await Creek.save.load('auto', { silent: true, quiet: true }); back = !!r.ok; }
+        if (slot) {
+          game.resetMap();                     // modules forget the lost ranch (a storm graph still waiting for the dropped storm), then the save fills them in again
+          const r = await sv.load(slot, { silent: true, quiet: true }); back = !!(r && r.ok);
+        }
         if (!back && Creek.story && Creek.story.free) Creek.story.free();
         lost = false;
         if (note) note.close();
-        const hi = notice({ title: 'The picture is back', text: back ? 'Your ranch was put back from the last autosave.' : 'The ranch was started fresh, because there was no autosave yet.' });
+        const hi = notice({ title: 'The picture is back', text: back ? 'Your ranch was put back from your last save.' + (wasStory ? ' The story could not be kept, so you carry on in free play.' : '') : 'The ranch was started fresh, because it had not been saved yet.' });
         setTimeout(() => hi.close(), 6000);
       } catch (e) {
         console.warn('[creek] could not rebuild after losing the graphics chip:', e);

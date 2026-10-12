@@ -307,7 +307,9 @@
         const Wv0 = clamp(52 * Math.sqrt(n.A) * 0.75, 25, 500), amp = clamp(0.3 * Wv0, 3, 55);
         const w = r.id === 'main' ? sstep(0, 900, frameDist(n)) : sstep(0, 150, arc) * sstep(0, 2, r.nodes.length - 1 - i);
         const off = amp * w * Math.sin(2 * Math.PI * arc / lam + ph);
-        n.x = n.ax + n.anx * off; n.y = n.ay + n.any * off;
+        // the main stem keeps its real course inside the ranch frame (the ranch map's own bends) and eases into the made-up bends outside it
+        const k = r.id === 'main' ? w : 1;
+        n.x = lerp(n.x, n.ax + n.anx * off, k); n.y = lerp(n.y, n.ay + n.any * off, k);
       });
     });
     nodes.forEach(relen);

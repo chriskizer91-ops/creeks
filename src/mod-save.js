@@ -34,7 +34,7 @@
     if (name === 'SecurityError' || name === 'InvalidStateError' || name === 'NotAllowedError') return { code: 'nodb', message: MSG.nodb };
     return { code: 'error', message: MSG.generic };
   }
-  const warn = (what, e) => { try { console.warn('[creek] save: ' + what, e); } catch (x) { /* ignore */ } };
+  const warn = (what, e) => { try { if (e === undefined) console.warn('[creek] save: ' + what); else console.warn('[creek] save: ' + what, e); } catch (x) { /* ignore */ } };
   const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
   /** A JSON copy with every typed array left out (the land never goes into the JSON part). */
   function plain(o) {
@@ -143,16 +143,26 @@
   }
 
   // ---------------------------------------------------------------- building a save
+  /** Module state from game.registerState, one module at a time: a module whose state cannot be written as JSON is left out alone
+      (copying them all in one go lost every module's state when one of them failed). */
+  function moduleState() {
+    const all = game.collectState() || {}, out = {};
+    Object.keys(all).forEach((id) => { const v = plain(all[id]); if (v !== null || all[id] === null) out[id] = v; else warn('the state of "' + id + '" could not be saved'); });
+    return out;
+  }
   function buildState() {
     return {
       uses: game.fields.map((f) => f.use), mapW: C.mapW, mapH: C.mapH,
       cash: game.cash, ledger: plain(game.ledger) || [], groundwater: game.groundwater, year: game.year, season: game.season, baseMoist: game.baseMoist,
       hintsShown: plain(game.hintsShown) || {}, lastStorm: plain(game.lastStorm), baseline: plain(game.baseline), stormHistory: plain(game.stormHistory) || [],
       upstreamFactor: game.upstreamFactor, tool: game.tool, sizeIdx: game.sizeIdx, optIdx: plain(game.optIdx) || {}, mode: ui.mode,
-      modules: plain(game.collectState()) || {}, extra: collectExtra()
+      modules: moduleState(), extra: collectExtra()
     };
   }
   let busy = 0, tail = Promise.resolve(), loading = false;
+  let ranchSlot = null;        // the slot holding the newest copy of the ranch being played; null = not saved since it was started
+  let ranchGen = 0;            // goes up whenever a new ranch starts (reset, new land), so a save that finishes later knows which ranch it holds
+  let changes = 0;            // counts changes worth keeping, so an autosave can tell whether more came in while it was writing
   /** One save or load at a time. */
   function exclusive(fn) {
     busy++;
@@ -172,20 +182,24 @@
   function save(slot, opts) {
     opts = opts || {};
     if (SLOTS.indexOf(slot) < 0) return Promise.resolve({ ok: false, code: 'error', message: MSG.generic });
-    if (opts.quiet && busy) return Promise.resolve({ ok: false, code: 'busy', message: '' });      // an autosave never queues up
+    if (opts.auto && busy) return Promise.resolve({ ok: false, code: 'busy', message: '' });      // an autosave never queues up
     return exclusive(() => doSave(slot, opts));
   }
   async function doSave(slot, o) {
     const rep = reporter(o);
     try {
-      const stop = () => { if (!game || !game.ready || !game.sim) throw fe('notready', MSG.notready); if (game.storm) throw fe('storm', MSG.storm); };
+      // a graphics chip that has just gone away reads back as all zeros (the browser tells us a moment later): never keep that
+      const lost = () => { const gl = game && game.gl; return !!(gl && gl.isContextLost && gl.isContextLost()); };
+      const stop = () => { if (!game || !game.ready || !game.sim || lost()) throw fe('notready', MSG.notready); if (game.storm) throw fe('storm', MSG.storm); };
       stop();
       rep.say('Getting ready to save…', 0.05); if (!o.fast) await tick();
       stop(); rep.say('Reading the land…', 0.15); if (!o.fast) await tick();
       stop();
       // everything that reads the graphics chip happens together, with nothing in between, so the pieces belong to the same moment
       let thumb = null; try { thumb = game.snapshot(240); } catch (e) { /* a save without a picture is still a save */ }
-      const T = game.sim.readTerrain(), M = game.sim.readMoisture(), state = buildState();
+      if (Creek.perf && Creek.perf.wake) Creek.perf.wake(300);              // the picture borrowed the map for the thumbnail: draw the map again at once, even while resting
+      const T = game.sim.readTerrain(), M = game.sim.readMoisture(), state = buildState(), gen = ranchGen;
+      stop();
       const meta = { version: VERSION, time: Date.now(), level: game.level, year: game.year, season: game.season, cash: Math.round(game.cash), mode: ui.mode, thumb, bytes: T.byteLength + M.byteLength };
       rep.say('Checking there is room…', 0.3); if (!o.fast) await tick();
       const old = index[slot];
@@ -193,6 +207,7 @@
       rep.say('Writing to this device…', 0.5); if (!o.fast) await tick();
       await idbWrite(slot, meta, { T: T.buffer, M: M.buffer, state });
       index[slot] = small(meta); writeIndex();
+      if (gen === ranchGen) ranchSlot = slot;                              // (unless the ranch was started over while this was being written)
       if (slot !== 'auto') Creek.settings.set('save.lastSlot', slot);
       const message = 'Saved to ' + LABEL[slot] + '.';
       say(o, true, message);
@@ -277,7 +292,9 @@
     game.cash = s.cash; game.ledger = Array.isArray(s.ledger) ? s.ledger : []; game.groundwater = num(s.groundwater, 9000);
     game.year = Math.round(s.year); game.season = s.season; game.baseMoist = num(s.baseMoist, C.seasons[s.season].moist);
     game.hintsShown = s.hintsShown && typeof s.hintsShown === 'object' ? s.hintsShown : {};
-    game.lastStorm = s.lastStorm || null; game.baseline = s.baseline || null; game.stormHistory = Array.isArray(s.stormHistory) ? s.stormHistory : [];
+    // in the game the last storm is always the newest entry of the history (the same object); keep it that way after a load
+    const hist = Array.isArray(s.stormHistory) ? s.stormHistory : [];
+    game.stormHistory = hist; game.lastStorm = s.lastStorm ? (hist.length ? hist[hist.length - 1] : s.lastStorm) : null; game.baseline = s.baseline || null;
     game.analysis = null; game.undoState = null; game.upstreamFactor = num(s.upstreamFactor, 1);
     const onR = sim.onRestore; sim.onRestore = null;                       // one "terrain" event at the very end instead of one now
     try { sim.restore(new Float32Array(rec.T), new Float32Array(rec.M)); } finally { sim.onRestore = onR; }
@@ -296,7 +313,7 @@
     game.cashChanged(); ui.buildLabels(); ui.refreshSeasonBar(); ui.updateTools();
     game.terrainChanged();
     game._guard('refresh hints', () => ui.refreshHints());
-    pristine = false; dirty = false; clearTimeout(timer); timer = null; timerDue = 0;
+    pristine = false; dirty = false; clearTimeout(timer); timer = null; timerDue = 0; ranchGen++; ranchSlot = slot;
     game.emit('loaded', { slot, meta: rec.meta });
     return note;
   }
@@ -317,7 +334,7 @@
   }
   async function remove(slot) {
     if (SLOTS.indexOf(slot) < 0) return false;
-    try { await idbDelete(slot); delete index[slot]; writeIndex(); return true; } catch (e) { warn('deleting failed', e); return false; }
+    try { await idbDelete(slot); delete index[slot]; writeIndex(); if (ranchSlot === slot) ranchSlot = null; return true; } catch (e) { warn('deleting failed', e); return false; }
   }
   let resolveReady; const readyP = new Promise((r) => { resolveReady = r; });
   function refresh() { return list().then(() => { resolveReady(); return true; }, () => { resolveReady(); return false; }); }
@@ -330,13 +347,15 @@
     if (timer && timerDue <= due) return;
     clearTimeout(timer); timerDue = due; timer = setTimeout(() => { timer = null; timerDue = 0; autosave('timer'); }, ms);
   }
-  function markChange(ms) { if (loading || !game || !game.ready) return; pristine = false; dirty = true; schedule(ms); }
+  function markChange(ms) { if (loading || !game || !game.ready) return; pristine = false; dirty = true; changes++; schedule(ms); }
   async function autosave(why) {
     if (!game || !game.ready || loading || autoOff || !dirty || pristine) return;
     if (game.storm) return;                                                   // never during a storm; the end of the storm saves
     if (why !== 'hidden' && (game.stroke || (game.pointers && game.pointers.size))) { schedule(3000); return; }
-    const r = await save('auto', { quiet: true, silent: true, fast: why === 'hidden' });
-    if (r.ok) dirty = false;
+    const mark = changes;
+    const r = await save('auto', { auto: true, quiet: true, silent: true, fast: why === 'hidden' });
+    if (r.ok) { if (changes === mark) dirty = false; }                        // a change made while it was writing is not in it: keep it for the next one
+    else if (r.code === 'busy' || r.code === 'notready') { if (why !== 'hidden') schedule(3000); }   // a save or load was running, or the land was being rebuilt: try again soon
     else if (r.code === 'nodb') autoOff = true;
     else if (r.code === 'quota' && Date.now() - quotaToldAt > 600000) { quotaToldAt = Date.now(); ui.toast('The ranch could not be saved automatically: this device is full.'); }
   }
@@ -445,16 +464,20 @@
     ready: readyP, refresh,
     /** Promise of [{slot, label, meta|null, empty?, damaged?}] for auto, slot1..3. meta.thumb is a small JPEG data URL. */
     list,
-    /** save(slot, opts) -> Promise<{ok, code, message}>; never rejects. opts: {silent (no toast), onProgress(text, 0..1)}. */
+    /** save(slot, opts) -> Promise<{ok, code, message}>; never rejects. opts: {silent (no toast), quiet (no full-screen bar), onProgress(text, 0..1)}. */
     save,
     /** load(slot, opts) -> Promise<{ok, code, message, meta}>; never rejects. Rebuilds the level first if the save was made at another one. */
     load,
     remove, extraState,
-    /** Save into the slot used last (the S key). */
-    quickSave: () => save(lastSlot()),
+    /** Save into the slot used last (the S key). Quiet: a toast at the end, no full-screen bar for a key press. */
+    quickSave,
+    /** The slot that holds the newest copy of the ranch being played (saved or loaded since it was started), or null. The settings
+        module puts this one back after the graphics chip comes back; an autosave from another visit is a different ranch. */
+    current: () => ranchSlot,
     openCard, lastSlot, delays,
     isBusy: () => busy > 0 || loading
   };
+  function quickSave() { return save(lastSlot(), { quiet: true }); }
 
   Creek.registerModule({
     id: 'save',
@@ -472,9 +495,11 @@
         if (!def || def.kind === 'look' || def.readonly) return;           // looking never changes the ranch
         markChange(delays.idle);
       });
-      game.on('terrain', () => { if (!pristine && !loading) { dirty = true; schedule(delays.idle); } });
-      const fresh = () => { pristine = true; dirty = false; clearTimeout(timer); timer = null; timerDue = 0; };
+      game.on('terrain', () => { if (!pristine && !loading) { dirty = true; changes++; schedule(delays.idle); } });
+      // a new ranch (start over, free play, the story, a new detail level): nothing to keep until the player changes it, and no save holds it yet
+      const fresh = () => { pristine = true; dirty = false; clearTimeout(timer); timer = null; timerDue = 0; ranchGen++; ranchSlot = null; };
       game.on('reset', fresh); game.on('ready', () => { if (!loading) fresh(); });
+      if (Creek.shortcuts) Creek.shortcuts.add({ key: 's', desc: 'Quick save', fn: () => { if (!game.ready) return false; quickSave(); } });
       // leaving the page: save right away if there is anything new
       const away = () => { if (document.visibilityState === 'hidden') autosave('hidden'); };
       document.addEventListener('visibilitychange', away); window.addEventListener('pagehide', () => autosave('hidden'));
