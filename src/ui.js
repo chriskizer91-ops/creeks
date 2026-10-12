@@ -298,7 +298,7 @@
     const grown = i.growth > 0 && [1, 2, 3, 6, 7, 9].indexOf(i.cover) >= 0 ? ', ' + Math.round(i.growth * 100) + '% grown' : '';
     let html = '<b>' + (rock ? 'Bare limestone' : (i.soil ? 'Sandy loam' : 'Black clay') + ', ' + Math.round((i.h - i.bed) * 100) + ' cm over rock') + '</b>' +
       (f ? '<br>' + esc(f.name) + (f.kind === 'field' && u ? ' · ' + u.icon + ' ' + esc(u.short) : '') : '') +
-      '<br>' + covers[i.cover] + grown + (rock ? '' : ' · organic matter ' + Math.round(i.som * 100) + '%') +
+      '<br>' + covers[i.cover] + grown + (rock ? '' : ' · organic matter ' + Creek.somText(i.som)) +
       '<br>Ground ' + i.h.toFixed(2) + ' m high (' + Math.round(i.h * 3.281) + ' ft)';
     if (i.depth > 0.004) html += '<br>💧 Water ' + (i.depth >= 1 ? i.depth.toFixed(1) + ' m' : Math.round(i.depth * 100) + ' cm') + ' deep, moving ' + i.speed.toFixed(1) + ' m/s';
     el.innerHTML = html; el.classList.remove('hidden');
@@ -394,13 +394,13 @@
     const rows = g.fields.filter(f => f.kind === 'field').map((f, i) => {
       const e = eco && eco.per[f.id - 1], ha = f.area / 1e4;
       const som = e ? e.somMean : 0;
-      return '<tr><td>' + U[f.use].icon + ' ' + f.name + '</td><td>' + Math.round(acres(ha)) + ' ac</td><td><span class="meter"><i style="width:' + Math.min(100, Math.round(som / 0.7 * 100)) + '%"></i></span> ' + Math.round(som * 100) + '%</td>' +
+      return '<tr><td>' + U[f.use].icon + ' ' + f.name + '</td><td>' + Math.round(acres(ha)) + ' ac</td><td><span class="meter"><i style="width:' + Math.min(100, Math.round(som / 0.7 * 100)) + '%"></i></span> ' + Creek.somText(som) + '</td>' +
         '<td class="n ' + (e && e.net * 4 / Math.max(ha, 0.1) < 0 ? 'neg' : '') + '">' + (e ? money(e.net * 4 / Math.max(ha, 0.1)) : '–') + '/ha</td></tr>';
     }).join('');
     const hist = g.ledger.slice(-14).reverse().map(l => '<tr><td>Y' + l.y + ' ' + SEASON_NAME[l.s] + '</td><td>' + l.text + '</td><td class="n ' + (l.amount < 0 ? 'neg' : 'pos') + '">' + money(l.amount) + '</td></tr>').join('') || '<tr><td colspan="3">Nothing yet.</td></tr>';
     const an = g.analysis || g.analyze(g.sim.readTerrain());
     const html = '<p class="sub">Bank height along ' + C.creekName + ': <b>' + (an.main.mean * 3.281).toFixed(1) + ' ft</b> · gullies: <b>' + (an.gullyMean * 3.281).toFixed(1) + ' ft</b> · dry-season creek flow index: <b>' + g.baseflow().toFixed(0) + ' L/s</b>' +
-      (ls ? ' · soil organic matter: <b>' + Math.round(ls.somMean * 100) + '%</b>' : '') + '</p>' +
+      (ls ? ' · soil organic matter: <b>' + Creek.somText(ls.somMean) + '</b>' : '') + '</p>' +
       '<h2 style="font-size:16px">Fields <span class="pill">soil health · income per hectare per year</span></h2><div class="scroll"><table class="res small">' + rows + '</table></div>' +
       '<h2 style="font-size:16px">The ledger</h2><div class="scroll"><table class="res small">' + hist + '</table></div>';
     await ui.card({ title: 'Ranch books · ' + money(g.cash), html, buttons: [{ label: 'Close' }] });
@@ -413,8 +413,8 @@
     // module items sit between Settings and "Start the ranch over" (docs/EXTENSION_API.md)
     const html = '<div class="menugrid">' +
       '<div class="sep">Play</div>' + btn('📖 Story: the first years', 'story', ' ') + btn('🧭 Free play', 'free', ' ') +
-      '<div class="sep">More</div>' + btn('🖼️ Picture book', 'book') + btn('⚙️ Settings', 'settings') + ui.menuItems.map((m, i) => btn(m.label, 'mod:' + i)).join('') +
-      '<div class="sep">Ranch</div>' + btn('🔍 Detail level', 'level') + btn('↺ Start the ranch over', 'reset') +
+      '<div class="sep">More</div>' + btn('🖼️ Picture book', 'book', 'tile') + btn('⚙️ Settings', 'settings', 'tile') + ui.menuItems.map((m, i) => btn(m.label, 'mod:' + i, 'tile')).join('') +
+      '<div class="sep">Ranch</div>' + btn('🔍 Detail level', 'level', 'tile') + btn('↺ Start the ranch over', 'reset', 'alt') +
       '</div>';
     let picked = 'close';
     const v0 = await ui.card({

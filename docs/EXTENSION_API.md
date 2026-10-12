@@ -495,6 +495,12 @@ Differences from the first plan, and things that are easy to trip over:
 11. On a 360 px phone the cash chip and banner were wider than the screen; they now shrink (banner text is cut with an ellipsis) and the view chip row scrolls.
 12. The Settings card, the `?` shortcut card and module menu items are modal cards: the shortcut dispatcher ignores keys while any card is open.
 13. `ui.addButton`/`ui.panel` ids: if an element with that id already exists the button gets no `id` attribute (a warning is logged) but is still returned.
+16. **Lab panels share the screen.** The storm graph (right-hand column, under the storm box) and Ranch health (down the left) place themselves from the
+    real screen furniture, and the newest one wins: on a phone only one shows at a time. When one shows, hides or rolls up it fires the DOM event
+    `document` `"creek-lab-panels"` with `detail = {id, open}`; the Trace and Section panels listen and move aside. A module with its own panel can
+    listen too, or fire it.
+17. **Soil organic matter** is a 0..1 index in the engine (`M.b`, `probe().som`). Show it to players with `Creek.somText(index)` ("2.3%") or
+    `Creek.somPct(index)`, which turn it into a real percentage (`CONFIG.som.pctBase + pctPer * index`, about 0.5 to 6%).
 14. **A storm is dropped when the land is rebuilt or reset** (`game.loadLevel`, `game.resetMap` call `game.dropStorm`). Before, the old storm kept
     stepping on the new land and its report compared two lands of different sizes, and the story's "before" storm could not start.
 15. **Errors the game loop catches** go to `game.cbs.error`. Without the settings module that is the big "Something went wrong" card (at most every 10 s);

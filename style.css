@@ -198,6 +198,8 @@ button:disabled { cursor: default; }
 .menugrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 2px; }
 .menugrid .go { padding: 11px 12px; font-size: 14px; width: 100%; }
 .menugrid .go.wide { grid-column: 1 / -1; }
+.menugrid .go.tile { background: var(--paper2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); font-weight: 600; text-align: left; padding-left: 14px; }
+.menugrid .go.tile:hover { background: #f3e8cd; }
 .menugrid .sep { grid-column: 1 / -1; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink2); margin: 6px 2px 0; }
 
 /* ---- the loading screen */

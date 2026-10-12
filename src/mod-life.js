@@ -79,7 +79,7 @@
       parts.push({ id, label: d.label, value: Math.round(clamp(value, 0, 100)), raw, text, tip, known: known !== false, weight: d.w });
     };
     add('som', (st.som - 0.15) / 0.5 * 100, st.som,
-      'Soil is full of bits of old plants and roots, and that holds water like a sponge. Yours is ' + pc(st.som) + ' of this stuff.',
+      'Soil is full of bits of old plants and roots, and that holds water like a sponge. Yours is ' + (Creek.somText ? Creek.somText(st.som) : pc(st.som)) + ' organic matter; native prairie soil here has 4 to 6%.',
       'No-till fields with cover crops, and cattle that move often, both build richer soil.');
     add('cover', (st.live - 0.4) / 0.55 * 100, st.live,
       'Growing plants and left-over stalks cover the ground like a blanket, so raindrops do not hit bare dirt. ' + pc(st.live) + ' of your land is covered' +
@@ -256,7 +256,7 @@
       onShow: (card) => card.querySelectorAll('.lf-tile:not(.lock)').forEach((b) => { b.onclick = () => { ui.closeCard(); showPostcard(CARDS[+b.dataset.i].id, true); }; }) });
   }
   let menuItem = null;
-  function updateMenuLabel() { if (menuItem) menuItem.label = 'Postcards (' + CARDS.filter((c) => unlocked[c.id]).length + ' of ' + CARDS.length + ')'; }
+  function updateMenuLabel() { if (menuItem) menuItem.label = '📮 Postcards (' + CARDS.filter((c) => unlocked[c.id]).length + ' of ' + CARDS.length + ')'; }
 
   // ---------------------------------------------------------------- stroke clues (no land reading needed)
   /** Is this point within a bank's reach of one of the creeks? */

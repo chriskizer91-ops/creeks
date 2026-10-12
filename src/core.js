@@ -134,6 +134,11 @@
     return api;
   })();
 
+  // ---------------------------------------------------------------- units
+  /** Soil organic matter as a real percentage (the engine keeps a 0..1 index; see CONFIG.som). somText gives "2.3%". */
+  Creek.somPct = function (index) { const s = (Creek.CONFIG && Creek.CONFIG.som) || {}; return (s.pctBase != null ? s.pctBase : 0.5) + (s.pctPer != null ? s.pctPer : 6) * (+index || 0); };
+  Creek.somText = function (index) { return Creek.somPct(index).toFixed(1) + '%'; };
+
   // ---------------------------------------------------------------- modules
   // A module is one script, src/mod-<id>.js, that calls Creek.registerModule({id, init(game, ui), ready(game, ui)}).
   // main.js loads the scripts, then calls init for every enabled module (after ui.init, before game.boot);

@@ -296,7 +296,7 @@
     buildTourDom();
     const steps = SPECS.map((spec) => ({ spec })).filter((s) => { try { return s.spec.holes().some((h) => h.b); } catch (e) { return false; } });   // a step whose element is missing is skipped
     if (steps.length < 2) return false;
-    T.steps = steps; T.idx = 0; T.active = true; T.away = false; T.probed = false; T.forced = false;
+    T.steps = steps; T.idx = 0; T.active = true; T.away = false; T.probed = false; T.forced = false; T.shown = true;
     T.root.classList.remove('co-away'); $('app').classList.add('co-touring'); showStep();
     return true;
   }
@@ -315,7 +315,7 @@
   }
   function tourTick() {            // every 400 ms: is it a good moment to begin?
     if (T.active || tourParam === '0' && !T.forced) return;
-    const want = T.forced || (T.engaged && (!mem.tour || tourParam === '1'));
+    const want = T.forced || (T.engaged && !T.shown && (!mem.tour || tourParam === '1'));     // by itself at most once a visit
     if (!want) { T.stable = 0; return; }
     if (calm()) { T.stable += 400; if (T.stable >= 1200) { T.stable = 0; if (!startTour()) { T.forced = false; if (!mem.tour) { mem.tour = 1; saveMem(); } } } } else T.stable = 0;
   }

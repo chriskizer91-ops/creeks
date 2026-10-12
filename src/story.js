@@ -75,7 +75,7 @@
       years.push({ y, cash: g.cash, change: g.cash - startCash });
       if (y < YEARS) {
         const M = g.sim.readMoisture(), som = g.meanSom(M), an = g.analysis;
-        await ui.card({ img: y === 1 ? undefined : P().firstFlow, title: 'Year ' + y + ' is done', text: 'Cash: ' + money(g.cash) + ' (' + (g.cash - startCash >= 0 ? '+' : '−') + money(Math.abs(g.cash - startCash)).replace('−', '') + ' this year). Soil organic matter is ' + Math.round(som * 100) + '%. Plum Creek’s banks are ' + ft(an.main.mean) + ' feet tall and the gullies ' + ft(an.gullyMean) + ' feet. Dry-season creek flow index: ' + g.baseflow().toFixed(0) + ' L/s.', buttons: [{ label: 'On to year ' + (y + 1) }] });
+        await ui.card({ img: y === 1 ? undefined : P().firstFlow, title: 'Year ' + y + ' is done', text: 'Cash: ' + money(g.cash) + ' (' + (g.cash - startCash >= 0 ? '+' : '−') + money(Math.abs(g.cash - startCash)).replace('−', '') + ' this year). Soil organic matter is ' + Creek.somText(som) + '. Plum Creek’s banks are ' + ft(an.main.mean) + ' feet tall and the gullies ' + ft(an.gullyMean) + ' feet. Dry-season creek flow index: ' + g.baseflow().toFixed(0) + ' L/s.', buttons: [{ label: 'On to year ' + (y + 1) }] });
       }
     }
 
@@ -109,11 +109,13 @@
       row('Soil washed off its place', b ? Math.round(b.soilLost * 1.3).toLocaleString() + ' tons' : '—', Math.round(f.soilLost * 1.3).toLocaleString() + ' tons') +
       row('Plum Creek bank height', ft(A0.main.mean) + ' ft', ft(A1.main.mean) + ' ft') +
       row('Gully depth (the five draws)', ft(A0.gullyMean) + ' ft', ft(A1.gullyMean) + ' ft') +
-      row('Soil organic matter', b ? Math.round(b.somMean * 100) + '%' : '—', Math.round(f.somMean * 100) + '%') +
+      row('Soil organic matter', b ? Creek.somText(b.somMean) : '—', Creek.somText(f.somMean)) +
       row('Money in the bank', money(startCash), money(g.cash)) + '</table>';
     let text = 'Both runs are the same 10-year storm.';
     if (b) text += ' Your ranch changed the peak flow leaving it by ' + Math.abs(pct(b.peakOut, f.peakOut)) + '% (' + (pct(b.peakOut, f.peakOut) >= 0 ? 'lower' : 'higher') + ').';
-    text += ' That is the honest part: your 500 acres are one fifth of the 2,500 the creek drains. The other four fifths sent the same water as before. Work in the creek itself, and neighbours upstream doing the same, is what turns a creek around.';
+    const nb = Creek.neighbors && Creek.neighbors.state ? Creek.neighbors.state() : null;
+    const upstream = nb && nb.count > 0 ? ' Upstream, ' + (nb.count === 1 ? 'one neighbour' : nb.count + ' neighbours') + ' tried your methods, so the other four fifths sent about ' + Math.round((1 - nb.factor) * 100) + '% less water.' : ' The other four fifths sent the same water as before.';
+    text += ' That is the honest part: your 500 acres are one fifth of the 2,500 the creek drains.' + upstream + ' Work in the creek itself, and neighbours upstream doing the same, is what turns a creek around.';
     await ui.card({ title: 'Three years at Bluestem Ranch', text, html, buttons: [{ label: 'Continue' }] });
   }
 })();

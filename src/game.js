@@ -35,7 +35,7 @@
     { id: 'map',   label: '🗺️ Map',          lens: 0, toast: 'Back to the map.', desc: 'The ranch as it looks from the air.' },
     { id: 'soil',  label: '🟤 Soil health',  lens: 1, toast: 'Soil health: dark = rich in organic matter, pale = tired soil. Rich soil soaks up water.',
       desc: 'How much organic matter the soil holds. Rich soil soaks up rain.',
-      legend: { title: 'Soil organic matter', ramp: ['#d6b87a', '#a5774a', '#5c3a22', '#382316'], left: 'tired', right: 'rich', note: 'Grey: roofs and roads.' } },
+      legend: { title: 'Soil organic matter', ramp: ['#d6b87a', '#a5774a', '#5c3a22', '#382316'], left: 'tired, under 1%', right: 'rich, 5%', note: 'Grey: roofs and roads.' } },
     { id: 'moved', label: '🔴 Soil moved',   lens: 2, toast: 'Soil moved since the start: red = washed away, blue = piled up. This is where the land is changing.',
       desc: 'Where soil washed away (red) or was dropped (blue) since day one.',
       legend: { title: 'Soil moved since day one', ramp: ['#bf1f14', '#f29a4c', '#dcd6ca', '#73b2e6', '#144ea8'], left: 'washed away', right: 'built up', note: 'Full colour is a metre or more.' } },

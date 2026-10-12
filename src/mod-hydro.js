@@ -745,11 +745,12 @@
       g.addLens({
         id: 'flow', label: '💧 Water paths',
         toast: 'Water paths: the blue lines show where rain runs when it hits the ground. A thicker line carries water from more land. Try the Trace tool on one.',
+        desc: 'Where rain runs once it hits the ground, and how much land feeds each line.',
+        legend: { title: 'Land draining through each line', ramp: ['#b7cfe9', '#5f93d6', '#1f5fbf'], left: 'an acre', right: 'thousands of acres', note: 'Water runs straight downhill, across the brown lines. Try the Trace tool (T) on one.' },
         activate() { flowOn = true; if (model) uploadFlow(); else startBuild(); },
         deactivate() { flowOn = false; g.extras.flow = null; }
       });
-      const chip = ui.addButton({ slot: 'view', id: 'hydroPaths', label: '💧 Paths', title: 'Show where the rain runs', toggle: true, onClick: (on) => { g.setLens(on ? 'flow' : 'map'); } });
-      g.on('lens', (id) => { if (chip) chip.classList.toggle('on', id === 'flow'); });
+      // (no chip of its own: the view menu lists it, with its line and colour key, and W turns it on and off)
 
       // ---- keys
       const sc = Creek.shortcuts, off = () => !g.ready || riverOpen();          // the valley view covers the map: these keys are not ours then

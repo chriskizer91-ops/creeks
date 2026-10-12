@@ -8,7 +8,8 @@ Creek.CONFIG = {
 
   // Feature modules to load, in order: each id is a script src/mod-<id>.js (see docs/EXTENSION_API.md).
   // ?mods=a,b in the address replaces this list ("?mods=" means none); ?addmods=c adds to it.
-  modules: ['river'],
+  // settings first (it wraps game.draw and the storm controls), river last (it hides the ranch screen while the valley is open).
+  modules: ['settings', 'save', 'view3d', 'hydro', 'stormgraph', 'life', 'audio', 'coach', 'river'],
 
   // The ranch: 1400 m × 1450 m = 2.03 km² ≈ 502 acres. x runs west→east, y runs north→south (downhill).
   mapW: 1400, mapH: 1450,
@@ -40,7 +41,9 @@ Creek.CONFIG = {
     critSpeed: [0.5, 0.3]   // m/s before water starts picking soil up
   },
   // Organic matter (0..1) makes soil soak water, hold together and resist washing.
-  som: { infil: 1.2, erode: 0.5, stable: 0.25 },
+  // The engine keeps it as an index 0..1; on screen it is shown as a real soil organic-matter percentage, pctBase + pctPer × index
+  // (worn-out cropland about 1.5%, good pasture 2.5 to 3%, native prairie and woods 4 to 6%, as in Blackland and Cross Timbers soils).
+  som: { infil: 1.2, erode: 0.5, stable: 0.25, pctBase: 0.5, pctPer: 6 },
 
   // Water engine tuning
   sim: {
