@@ -44,11 +44,13 @@
     const an = g.analyze(T);
     return { som: somN ? somSum / somN : 0, live: land ? live / land : 0, per: land ? per / land : 0, pond, dam, mainH: an.main.mean, gullyH: an.gullyMean };
   }
-  /** The measurement of the real land now, reusing the last one if the land has not changed. Never reads while a storm is running. */
+  /** The measurement of the real land now, reusing the last one if the land has not changed. Never reads while a storm or a
+      stroke is still changing the land (the version moves every frame then; a caller asking every frame must not cost a read-back each time). */
   function stats(force) {
     const g = game; if (!g || !g.ready || !g.sim) return startStats;
-    if (cur && cur.sim === g.sim && !force && (cur.ver === g.terrainVersion || g.storm)) return cur;
-    if (g.storm && !cur) return startStats;
+    const busy = !!(g.storm || g.stroke);
+    if (cur && cur.sim === g.sim && !force && (cur.ver === g.terrainVersion || busy)) return cur;
+    if (busy && !force && !(cur && cur.sim === g.sim)) return startStats;
     const r = guard('measure', () => { const T = g.sim.readTerrain(), M = g.sim.readMoisture(), s = statsFrom(T, M); s.ver = g.terrainVersion; s.sim = g.sim; return s; });
     if (r) cur = r;
     return cur || startStats;
@@ -81,7 +83,7 @@
       'No-till fields with cover crops, and cattle that move often, both build richer soil.');
     add('cover', (st.live - 0.4) / 0.55 * 100, st.live,
       'Growing plants and left-over stalks cover the ground like a blanket, so raindrops do not hit bare dirt. ' + pc(st.live) + ' of your land is covered' +
-      (env.season && env.season !== 'summer' && env.season !== 'spring' ? ' (plowed fields sit bare in ' + env.season + ')' : '') + '.',
+      (env.tilled && env.season && env.season !== 'summer' && env.season !== 'spring' ? ' (plowed fields sit bare in ' + env.season + ')' : '') + '.',
       'Cover crops and no-till keep a blanket on the fields all year.');
     add('roots', (st.per - 0.45) / 0.5 * 100, st.per,
       'Prairie grass, pasture, trees and willows live for years and their roots go deep. ' + pc(st.per) + ' of your land has them.',
@@ -115,7 +117,7 @@
   }
   function envNow() {
     const g = game;
-    return { storm: g.lastStorm || g.baseline || null, bf: g.baseflow(), init: g.initialAnalysis, season: g.season };
+    return { storm: g.lastStorm || g.baseline || null, bf: g.baseflow(), init: g.initialAnalysis, season: g.season, tilled: g.fields.some((f) => f.use === 'till') };
   }
   let lastScore = null;
   /** {total 0..100, parts: [{id, label, value 0..100, raw, text, tip, known}]}. Reads the land only if it has changed since the last time. */
@@ -214,9 +216,10 @@
   function pump() {
     if (!pumpTimer && (toasts.length || letterQueue.length)) pumpTimer = setInterval(() => guard('pump', pumpTick), 500);
   }
+  const riverOpen = () => !!(Creek.river && Creek.river.isOpen && Creek.river.isOpen());
   function pumpTick() {
     if (!toasts.length && !letterQueue.length) { clearInterval(pumpTimer); pumpTimer = 0; return; }
-    if (modalOpen() || !game.ready) return;
+    if (modalOpen() || !game.ready || riverOpen()) return;          // the valley view covers the ranch: keep the news for later
     if (letterQueue.length && !game.storm) { showLetter(letterQueue.shift()); return; }
     if (toasts.length && !toastEl.classList.contains('lf-on')) showToast(toasts.shift());
   }
@@ -265,17 +268,18 @@
   function onStrokeEnd(e) {
     if (!e || e.cancelled || !game.ready) return;
     const path = e.path || [];
-    if (e.tool === 'dig') {
+    // cost > 0 means the land really changed: a stamp tool (pond, trees) does nothing when the finger slid away, but the stroke still ends
+    if (e.tool === 'dig' && e.cost > 0) {
       for (let i = 0; i < path.length && flags.dig.length < 160; i += 2) if (nearBank(path[i].x, path[i].y)) flags.dig.push([Math.round(path[i].x), Math.round(path[i].y)]);
-    } else if (e.tool === 'plant') {
-      if (e.opt === 'willow' && (e.cost > 0 || path.length > 2)) flags.willow = true;
+    } else if (e.tool === 'plant' && e.cost > 0) {
+      if (e.opt === 'willow') flags.willow = true;
       if (flags.dig.length && !flags.roots) {
         outer: for (let i = 0; i < path.length; i++) for (let k = 0; k < flags.dig.length; k++) {
           const dx = path[i].x - flags.dig[k][0], dy = path[i].y - flags.dig[k][1];
           if (dx * dx + dy * dy < 15 * 15) { flags.roots = true; break outer; }
         }
       }
-    } else if (e.tool === 'pond') flags.pond = true;
+    } else if (e.tool === 'pond' && e.cost > 0) flags.pond = true;
     check(false);
   }
 
@@ -328,7 +332,7 @@
   };
 
   // ---------------------------------------------------------------- the Ranch health panel
-  let panel = null, panelBody = null, btn = null;
+  let panel = null, panelBody = null, btn = null, ro = null;
   const WORDS = [[25, 'Just getting started'], [45, 'Waking up'], [65, 'Getting healthier'], [80, 'Thriving'], [101, 'Bursting with life']];
   const word = (t) => WORDS.find((w) => t < w[0])[1];
   function meterHtml(v, big) { return '<div class="lf-meter' + (big ? ' big' : '') + '"><b style="width:' + (100 - clamp(v, 0, 100)) + '%"></b></div>'; }
@@ -352,6 +356,31 @@
       const a = panelBody.querySelector('.lf-letters'), b = panelBody.querySelector('.lf-cards');
       if (a) a.onclick = showAllLetters; if (b) b.onclick = openGallery;
     });
+  }
+
+  // ---- where the panel sits. Measured from the real screen furniture, so it follows the HUD: on a phone across the screen under the
+  // storm buttons, on a wider screen down the left side under the view chips (and under the storm report while it shows); above the
+  // tool tray either way. The lab panels (Ranch health, Storm graph, Trace, Section) never sit on top of each other: the newest wins.
+  const LAB = ['stormgraph', 'health', 'hy-trace', 'hy-section'];
+  const TOP_THINGS = '#topbar > *, #topbar2, #scalebar, #stormbar, #report', LOW_THINGS = '#toolbar, .panel[data-panel="view3d"]';
+  function rectsIn(sel, x0, x1) {
+    const out = [];
+    document.querySelectorAll(sel).forEach((e) => { const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0 && r.left < x1 && r.right > x0) out.push(r); });
+    return out;
+  }
+  function place() {
+    if (!panel || !panel.visible) return;
+    const app = document.getElementById('app'), vw = app.clientWidth, vh = app.clientHeight, st = panel.el.style;
+    const w = vw < 600 ? vw - 20 : Math.min(350, vw - 20), x0 = 10, x1 = 10 + w;
+    let top = 60, floor = vh - 10;
+    rectsIn(TOP_THINGS, x0, x1).forEach((r) => { top = Math.max(top, Math.round(r.bottom) + 8); });
+    rectsIn(LOW_THINGS, x0, x1).forEach((r) => { if (r.top > top) floor = Math.min(floor, Math.round(r.top) - 8); });
+    st.left = x0 + 'px'; st.right = 'auto'; st.width = w + 'px'; st.top = top + 'px'; st.bottom = 'auto'; st.maxHeight = Math.max(140, floor - top) + 'px';
+  }
+  function makeRoom() {
+    try { document.dispatchEvent(new CustomEvent('creek-lab-panels', { detail: { id: 'health', open: true } })); } catch (e) { /* fine */ }
+    const a = panel.el.getBoundingClientRect(), hit = (b) => a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2;
+    LAB.forEach((id) => { const p = ui.panels[id]; if (id !== 'health' && p && p.visible && hit(p.el.getBoundingClientRect())) p.hide(); });
   }
 
   // ---------------------------------------------------------------- what the game tells us
@@ -384,9 +413,10 @@
       game = g; ui = u;
       loadUnlocked();
       ui.styles([
-        /* phone: under the storm buttons, so they stay usable. Wide screens: down the left side, away from the storm buttons. */
+        /* until place() has measured the screen. Phone: under the storm buttons, so they stay usable. Wide screens: down the left side. */
         '.panel[data-panel="health"]{right:10px;left:auto;transform:none;top:calc(200px + var(--safe-t));width:min(350px,calc(100vw - 20px));max-height:calc(100% - 200px - 150px - var(--safe-b));min-height:120px}',
-        '@media (min-width:640px){.panel[data-panel="health"]{left:10px;right:auto;top:calc(120px + var(--safe-t));max-height:calc(100% - 120px - 150px)}}',
+        '@media (min-width:600px){.panel[data-panel="health"]{left:10px;right:auto;top:calc(120px + var(--safe-t));max-height:calc(100% - 120px - 150px)}}',
+        '.river-on .lf-toast{display:none}',
         '.lf-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:2px 0 6px}',
         '.lf-big b{font:700 34px Georgia,serif;color:var(--moss)}.lf-big span{color:var(--ink2);font-size:13px}',
         '.lf-word{font:italic 15px Georgia,serif;color:var(--ink2);text-align:right}',
@@ -418,13 +448,20 @@
       ].join('\n'));
       toastEl = document.createElement('div'); toastEl.className = 'lf-toast'; toastEl.setAttribute('role', 'status'); document.getElementById('app').appendChild(toastEl);
       panel = ui.panel({ id: 'health', title: '🌿 Ranch health', corner: 'tr', closable: true,
-        onShow: () => { if (btn) btn.classList.add('on'); renderPanel(); }, onHide: () => { if (btn) btn.classList.remove('on'); } });
+        onShow: () => { if (btn) btn.classList.add('on'); renderPanel(); place(); makeRoom(); },       // filled first: its real size decides what it covers
+        onHide: () => { if (btn) btn.classList.remove('on'); try { document.dispatchEvent(new CustomEvent('creek-lab-panels', { detail: { id: 'health', open: false } })); } catch (e) { /* fine */ } } });
+      // the storm box grows while a storm runs, the report card comes and goes, the tray grows a row: follow them
+      if (window.ResizeObserver) {
+        ro = new ResizeObserver(() => guard('place', place));
+        ['stormbar', 'report', 'toolbar', 'topbar2'].forEach((id) => { const e = document.getElementById(id); if (e) ro.observe(e); });
+      }
+      window.addEventListener('resize', () => guard('place', place));
       panelBody = panel.body;
       btn = ui.addButton({ slot: 'view', id: 'lifeBtn', label: '🌿 Health', title: 'How healthy is the ranch?', toggle: true,
         onClick: (on) => { if (on) { game.ready && score(); panel.show(); } else panel.hide(); } });
       menuItem = { label: 'Postcards', onClick: () => openGallery(), alt: true }; updateMenuLabel(); ui.addMenuItem(menuItem);
       ui.addMenuItem({ label: '🌿 Ranch health', onClick: () => { if (!panel.visible) { if (game.ready) score(); panel.show(); } }, alt: true });   // the chip may be scrolled out of sight on a phone
-      Creek.shortcuts.add({ key: 'h', desc: 'Ranch health panel', fn: () => { if (!game.ready) return false; if (game.ready && !panel.visible) score(); panel.toggle(); } });
+      Creek.shortcuts.add({ key: 'h', desc: 'Ranch health panel', fn: () => { if (!game.ready || riverOpen()) return false; if (!panel.visible) score(); panel.toggle(); } });   // the valley view would hide it
       game.on('season', (e) => guard('season', () => onSeason(e)));
       game.on('stormEnd', () => guard('stormEnd', onStormEnd));
       game.on('strokeEnd', (e) => guard('strokeEnd', () => onStrokeEnd(e)));
@@ -449,6 +486,9 @@
         // the start of the ranch, worked out from the world data itself (no GPU read-back)
         startStats = statsFrom(g.world.T, g.world.M); startStats.sim = null;
         resetRanch();
+        renderPanel();               // an open panel would still show the old ranch's numbers
+        // the 3D view's controls (bottom right) may be made after this module's init: watch them too, the panel must stop above them
+        const v3 = document.querySelector('.panel[data-panel="view3d"]'); if (ro && v3) ro.observe(v3);
       });
     }
   });

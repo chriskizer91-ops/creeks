@@ -107,7 +107,12 @@
     });
   }
   function onVisibility() { if (ctx) applyEnabled(); }
+  /** Browsers only let sound start once the page has had a real user activation. A touch's first pointerdown is not one yet (its
+      pointerup is), and a setting changed by code is not one either: starting before that gives a context that stays suspended and a
+      console warning. Without the userActivation API (older Safari) every gesture is taken at its word. */
+  const activated = () => { const u = navigator.userActivation; return !u || u.hasBeenActive; };
   function onGesture() {
+    if (!activated()) return;
     gestured = true;
     if (!enabled()) return;
     if (!ctx) ensure();

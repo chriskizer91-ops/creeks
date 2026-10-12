@@ -33,6 +33,7 @@
   const pc = (f) => { const p = f * 100; return p < 1 ? 'less than 1%' : p < 10 ? nf(p, 1) + '%' : nf(Math.round(p)) + '%'; };
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const esc = (t) => (ui && ui.esc ? ui.esc(t) : String(t));
+  const riverOpen = () => !!(Creek.river && Creek.river.isOpen && Creek.river.isOpen());     // the valley view (module "river") covers the map
 
   // ================================================================================================
   //  The model: coarse ground, filled, with downhill links and flow accumulation
@@ -150,6 +151,7 @@
 
   function pump() {
     const j = job; if (!j) return;
+    if (!game.ready || game.sim !== j.sim) { job = null; return; }     // a new detail level is loading: that land is gone (ready() starts again)
     const t0 = performance.now();
     try {
       while (performance.now() - t0 < 10) {
@@ -164,7 +166,7 @@
     if (job || !game || !game.ready || !game.sim) return;
     const ver = game.terrainVersion;
     let gen; try { gen = pipeline(game.sim, ver, game.world && game.world.meta); } catch (e) { console.error('[creek] hydro:', e); return; }
-    job = { gen, token: ++jobSeq, ver };
+    job = { gen, token: ++jobSeq, ver, sim: game.sim };
     clearTimeout(pumpTimer); pumpTimer = setTimeout(pump, 0);
   }
   /** Is anything on the screen using the water paths? Then keep them up to date. */
@@ -189,7 +191,9 @@
     if (model && model.ver === v) return;
     if (!model) startBuild();
     else if (!game.storm && now - changeT >= 400) startBuild();
-    else if (game.stroke && !game.storm && now - model.t >= 1500) startBuild();     // while digging, keep up now and then
+    // while digging, keep up now and then. Each build starts with a read-back of the whole grid, a stall the player feels on the
+    // finer levels (two million cells at 1 m), so there the lines catch up when the stroke ends instead.
+    else if (game.stroke && !game.storm && now - model.t >= 1500 && game.sim.nx * game.sim.ny <= 300000) startBuild();
   }
 
   // ================================================================================================
@@ -300,10 +304,10 @@
     if (r.area >= CHANNEL_ACRES) h += '<div class="hy-line">This is a stream channel: lots of small paths join here.</div>';
     if (r.pit >= 0.15) h += '<div class="hy-line">This spot is a hollow. Water gathers here and fills it about <b>' + mft(r.pit) + '</b> deep before it spills on.</div>';
     h += '<div class="hy-line">From here the water runs about <b>' + mft(r.plen) + '</b> downhill' + (r.drop > 0.05 ? ', dropping <b>' + mft(r.drop) + '</b>,' : '') + ' until it leaves the ranch at the south fence.</div>';
-    h += '</div><button class="hy-morebtn" type="button">More \u25BE</button>';
+    h += '</div><button class="hy-morebtn" type="button">' + (trPanel.el.classList.contains('hy-open') ? 'Less \u25B4' : 'More \u25BE') + '</button>';
     trEls.body.innerHTML = h + trEls.how;
     trPanel.setTitle('🌧️ Where does the water go?');
-    layout();
+    layout(); makeRoom();            // the panel has just grown from "Working…" to the full answer
   }
 
   // ================================================================================================
@@ -334,7 +338,7 @@
       let lt = bed, rt = bed;
       for (let i = Math.max(0, bed - W); i <= bed; i++) if (prof.h[i] > prof.h[lt]) lt = i;
       for (let i = bed; i <= Math.min(n - 1, bed + W); i++) if (prof.h[i] > prof.h[rt]) rt = i;
-      out.push({ s: k, name: s.name, bed, lt, rt, left: prof.h[lt] - lo, right: prof.h[rt] - lo, x: best.t * len });
+      out.push({ s: k, name: s.name, bed, lo, lt, rt, left: prof.h[lt] - lo, right: prof.h[rt] - lo, x: best.t * len });
     });
     return out.sort((a, b) => a.x - b.x);
   }
@@ -368,28 +372,35 @@
     let best = sec.cross[0]; sec.cross.forEach((c) => { if (Math.max(c.left, c.right) > Math.max(best.left, best.right)) best = c; });
     const tall = Math.max(best.left, best.right), nm = esc(best.name);
     if (tall < 0.3) return '<div class="hy-creek">\uD83C\uDF0A <b>' + nm + '</b> crosses your line here. Its banks are low, so floods can spread out.</div>';
-    const top = best.left >= best.right ? best.lt : best.rt, P = sec.prof, cover = P.cover[top], rd = C.cover.rootDepth[cover] * P.growth[top];
+    // Roots stop at the limestone, and a bank's rock part does not wash away: what matters is how much of the SOIL face the roots hold.
+    const top = best.left >= best.right ? best.lt : best.rt, P = sec.prof, cover = P.cover[top];
+    const soilTop = Math.max(0, P.h[top] - P.bed[top]), rd = Math.min(C.cover.rootDepth[cover] * P.growth[top], soilTop);
+    const rock = clamp(P.bed[top] - best.lo, 0, tall), soilFace = tall - rock;
     let roots, short;
-    if (rd < 0.05) { roots = 'The top of the bank is bare. No roots hold it, so fast water can dig under it and the bank falls in.'; short = 'The top is bare: nothing holds it, so a flood can dig under it and it falls in.'; }
-    else if (rd >= tall * 0.9) { roots = 'Roots reach almost to the bottom of the bank, so they help hold it up.'; short = 'Roots reach almost to the bottom, so they help hold it up.'; }
-    else { roots = 'Roots only reach about <b>' + mft(rd) + '</b> down. The rest of the bank has no roots to hold it, so a flood can dig under the top and the bank falls in.'; short = 'Roots reach only <b>' + mft(rd) + '</b>, so a flood can dig under the bank below that.'; }
+    if (soilFace < 0.3) { roots = 'Most of this bank is limestone rock, and water cannot wash rock away.'; short = 'It is mostly limestone rock, which water cannot wash away.'; }
+    else if (rd < 0.05) { roots = 'The top of the bank is bare. No roots hold it, so fast water can dig under it and the bank falls in.'; short = 'The top is bare: nothing holds it, so a flood can dig under it and it falls in.'; }
+    else if (rd >= soilFace * 0.9) { roots = rock > 0.3 ? 'Roots hold the soil all the way down to the rock, so the bank stays put.' : 'Roots reach almost to the bottom of the bank, so they help hold it up.'; short = rock > 0.3 ? 'Roots hold the soil down to the rock.' : 'Roots reach almost to the bottom, so they help hold it up.'; }
+    else { roots = 'Roots only reach about <b>' + mft(rd) + '</b> down. The soil below them has nothing to hold it, so a flood can dig under the top and the bank falls in.'; short = 'Roots reach only <b>' + mft(rd) + '</b>, so a flood can dig under the bank below that.'; }
     return '<div class="hy-creek">\uD83C\uDF0A <b>' + nm + '</b> crosses your line. ' +
       '<span class="hy-long">The bank on the left stands <b>' + mft(best.left) + '</b> above the creek bed and the one on the right <b>' + mft(best.right) + '</b>. ' + roots + '</span>' +
       '<span class="hy-short">Banks: <b>' + mft(best.left) + '</b> left, <b>' + mft(best.right) + '</b> right. ' + short + '</span></div>';
   }
 
+  /** Write html into el only when it changed. True if it did (then the panel may have changed size). */
+  const put = (el, html) => { if (el._html === html) return false; el._html = html; el.innerHTML = html; return true; };
   function renderSection() {
     if (!secEls.stats) return;
     const s = sec.stat, d = s.delta;
-    secEls.stats.innerHTML = '<span class="hy-chip">\u2194 <b>' + mft(sec.len) + '</b></span>' +
+    let grew = put(secEls.stats, '<span class="hy-chip">\u2194 <b>' + mft(sec.len) + '</b></span>' +
       '<span class="hy-chip" title="from the start of the line (A) to its end (B)">' + (Math.abs(d) < 0.05 ? '\u2796 level' : (d < 0 ? '\u2198 falls <b>' : '\u2197 rises <b>') + mft(Math.abs(d)) + '</b>') + '</span>' +
-      '<span class="hy-chip" title="the steepest bit of the line">\u26F0 <b>' + nf(s.steep * 100, s.steep * 100 < 10 ? 1 : 0) + '%</b> steep (' + nf(s.deg, s.deg < 10 ? 1 : 0) + '\u00B0)</span>';
-    secEls.creek.innerHTML = creekText();
+      '<span class="hy-chip" title="the steepest bit of the line">\u26F0 <b>' + nf(s.steep * 100, s.steep * 100 < 10 ? 1 : 0) + '%</b> steep (' + nf(s.deg, s.deg < 10 ? 1 : 0) + '\u00B0)</span>');
+    grew = put(secEls.creek, creekText()) || grew;
     const seen = {}; for (let i = 0; i < sec.n; i++) seen[sec.prof.cover[i]] = 1;
-    secEls.legend.innerHTML = Object.keys(seen).map(Number).sort((a, b) => a - b).map((k) => '<span class="hy-sw" style="background:' + COVER_COLORS[k] + '"></span>' + COVER_NAMES[k]).join(' ');
+    grew = put(secEls.legend, Object.keys(seen).map(Number).sort((a, b) => a - b).map((k) => '<span class="hy-sw" style="background:' + COVER_COLORS[k] + '"></span>' + COVER_NAMES[k]).join(' ')) || grew;
     secEls.ve.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.v === sec.ve));
-    if (sec.hover < 0 || sec.hover >= sec.n || !sec.pointing) restRead(); else readAt(sec.hover);
-    if (secPanel.visible) layout();
+    if (sec.hover < 0 || sec.hover >= sec.n || !sec.pointing) restRead(); else readAt(sec.hover);     // (this redraws the chart)
+    // the chart follows the water every few hundred ms in a storm: measure the screen again only when the words around it changed
+    if (secPanel.visible && grew) layout();
   }
 
   // ---- the chart
@@ -505,8 +516,8 @@
     sec.hover = i;
     const soil = Math.max(0, P.h[i] - P.bed[i]), cv = P.cover[i], d = P.dist[i];
     const wet = P.depth[i] > 0.01 ? ' · water <b>' + nf(P.depth[i] * 100) + ' cm</b> deep' : '';
-    secEls.read.innerHTML = '<b>' + mft(d) + '</b> along · ground <b>' + mft(P.h[i], 1) + '</b> high<br>' + COVER_NAMES[cv] +
-      (P.growth[i] > 0 && [1, 2, 3, 6, 7, 9].indexOf(cv) >= 0 ? ' (' + Math.round(P.growth[i] * 100) + '% grown)' : '') + ' · ' + (soil < 0.03 ? 'bare limestone' : 'soil <b>' + cmin(soil) + '</b> deep') + wet;
+    const what = soil < 0.03 && cv === 0 ? '' : COVER_NAMES[cv] + (P.growth[i] > 0 && [1, 2, 3, 6, 7, 9].indexOf(cv) >= 0 ? ' (' + Math.round(P.growth[i] * 100) + '% grown)' : '') + ' · ';   // "bare soil" on no soil reads oddly
+    secEls.read.innerHTML = '<b>' + mft(d) + '</b> along · ground <b>' + mft(P.h[i], 1) + '</b> high<br>' + what + (soil < 0.03 ? 'bare limestone' : 'soil <b>' + cmin(soil) + '</b> deep') + wet;
     // tell the map drawing code where the dot goes
     const L = sec.line, t = sec.n > 1 ? i / (sec.n - 1) : 0;
     if (game.extras.section) game.extras.section.marker = { x: L.x0 + (L.x1 - L.x0) * t, y: L.y0 + (L.y1 - L.y0) * t };
@@ -530,33 +541,63 @@
   // ================================================================================================
   //  Screen layout: the two panels never cover the tool tray or each other
   // ================================================================================================
-  let lastTray = 0;
+  let lastTray = 0, ro = null, secFrames = 0;
+  /** How far up a panel over the columns x0..x1 may reach: below the top-of-screen furniture that is there (menu row, view chips,
+      storm buttons and the storm box, the storm report card). Measured, so it follows the HUD. */
+  function topClear(x0, x1, min) {
+    let y = min;
+    document.querySelectorAll('#topbar > *, #topbar2, #scalebar, #stormbar, #report').forEach((e) => {
+      const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0 && r.left < x1 && r.right > x0) y = Math.max(y, Math.round(r.bottom) + 8);
+    });
+    return y;
+  }
   function layout() {
     if (!game || !trPanel || !secPanel) return;
     const app = document.getElementById('app'), tb = document.getElementById('toolbar'); if (!app || !tb) return;
-    const vw = app.clientWidth, vh = app.clientHeight, base = Math.max(110, Math.round(vh - tb.getBoundingClientRect().top + 8));
-    const wide = vw >= 900, narrow = vw < 600, tv = trPanel.visible, sv = secPanel.visible, topLimit = narrow ? 200 : 108;
+    const vw = app.clientWidth, vh = app.clientHeight, narrow = vw < 600, tv = trPanel.visible, sv = secPanel.visible, low = narrow ? 200 : 108;
+    let base = Math.max(110, Math.round(vh - tb.getBoundingClientRect().top + 8));
+    // a phone has no room beside the 3D view's controls (bottom right, they cannot be closed): sit on top of them instead
+    const v3 = narrow && ui.panels && ui.panels.view3d;
+    if (v3 && v3.visible) { const r = v3.el.getBoundingClientRect(); if (r.height > 0) base = Math.max(base, Math.round(vh - r.top + 8)); }
     lastTray = tb.offsetHeight;
+    // on a wider screen the storm graph keeps the right-hand column (and the 3D view its controls, bottom right): the slice stops short
+    // of them instead of running underneath (a graph rolled up to its title bar stays high above the slice, which is anchored to the
+    // tray: then the slice keeps its width)
+    const secTop = vh - base - Math.max(160, sv ? secPanel.el.offsetHeight : 0);
+    let right = vw - 10;
+    if (!narrow) ['stormgraph', 'view3d'].forEach((id) => {
+      const p = ui.panels && ui.panels[id]; if (!p || !p.visible) return;
+      const r = p.el.getBoundingClientRect(); if (r.width > 0 && r.left > 330 && r.bottom > secTop - 8) right = Math.min(right, Math.round(r.left) - 10);
+    });
+    const side = !narrow && tv && sv && right - 340 >= 480;                 // the trace fits beside the slice
+    const secLeft = side ? 340 : 10, secW = Math.max(200, Math.min(right - secLeft, narrow ? 640 : 900)), wide = !narrow && secW >= 640;
     [trPanel, secPanel].forEach((pn) => pn.el.classList.toggle('hy-narrow', narrow));
     secPanel.el.classList.toggle('hy-wide', wide);
     let secH = 0;
     if (sv) {
-      const el = secPanel.el, left = wide ? (tv ? 340 : 10) : 10, w = wide ? Math.min(vw - left - 10, 900) : Math.min(vw - 20, 640);
-      el.style.left = left + 'px'; el.style.right = 'auto'; el.style.width = w + 'px'; el.style.bottom = base + 'px'; el.style.maxHeight = Math.max(160, vh - base - topLimit) + 'px';
+      const el = secPanel.el, topLimit = topClear(secLeft, secLeft + secW, low);
+      el.style.left = secLeft + 'px'; el.style.right = 'auto'; el.style.width = secW + 'px'; el.style.bottom = base + 'px'; el.style.maxHeight = Math.max(160, vh - base - topLimit) + 'px';
       let ch = wide ? 180 : vw < 420 ? 128 : 160; secEls.cv.style.height = ch + 'px';
       while (narrow && !el.classList.contains('hy-collapsed') && el.scrollHeight > el.clientHeight + 2 && ch > 84) { ch -= 16; secEls.cv.style.height = ch + 'px'; }   // a phone: squeeze the picture rather than scroll
       secH = el.offsetHeight;
     }
     if (tv) {
-      const stacked = sv && !wide, el = trPanel.el, bottom = base + (stacked ? secH + 8 : 0), room = vh - bottom - topLimit;
+      const stacked = sv && !side, el = trPanel.el, bottom = base + (stacked ? secH + 8 : 0), w = Math.min(320, vw - 20), room = vh - bottom - topClear(10, 10 + w, low);
       el.classList.remove('hy-compact', 'hy-autofold');
-      el.style.left = '10px'; el.style.right = 'auto'; el.style.bottom = bottom + 'px'; el.style.width = Math.min(320, vw - 20) + 'px'; el.style.maxHeight = Math.max(60, room) + 'px';
+      el.style.left = '10px'; el.style.right = 'auto'; el.style.bottom = bottom + 'px'; el.style.width = w + 'px'; el.style.maxHeight = Math.max(60, room) + 'px';
       if (stacked && !el.classList.contains('hy-collapsed')) {      // both are open and they do not fit: shrink this one, first to the headline, then to its title
         if (el.scrollHeight > room) el.classList.add('hy-compact');
         if (el.scrollHeight > room) { el.classList.remove('hy-compact'); el.classList.add('hy-autofold'); }
       }
     }
     if (sv) drawChart();
+  }
+  /** One of our panels has just opened or grown: the lab panels (Trace, Section, Storm graph, Ranch health) never sit on top of
+      each other, so the newest wins and the other modules' panels it covers are closed. Trace and Section share out the room above. */
+  function makeRoom() {
+    const mine = [trPanel, secPanel].filter((p) => p.visible).map((p) => p.el.getBoundingClientRect());
+    const hit = (a, b) => a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2;
+    ['stormgraph', 'health'].forEach((id) => { const p = ui.panels && ui.panels[id]; if (p && p.visible) { const b = p.el.getBoundingClientRect(); if (mine.some((a) => hit(a, b))) p.hide(); } });
   }
 
   // ================================================================================================
@@ -596,23 +637,29 @@
   function addFold(panel, onChange) {
     const head = panel.el.querySelector('.phead'), x = head.querySelector('.px'), b = document.createElement('button');
     b.className = 'hy-fold'; b.textContent = '▾'; b.title = 'Fold this panel up or down'; b.setAttribute('aria-label', 'Fold this panel up or down');
-    b.onclick = () => { const f = panel.el.classList.toggle('hy-collapsed'); b.textContent = f ? '▴' : '▾'; layout(); if (onChange) onChange(f); };
+    b.onclick = () => { const f = panel.el.classList.toggle('hy-collapsed'); b.textContent = f ? '▴' : '▾'; layout(); if (!f) makeRoom(); if (onChange) onChange(f); };
     head.insertBefore(b, x);
   }
 
   function buildPanels() {
     trPanel = ui.panel({
       id: 'hy-trace', title: '🌧️ Where does the water go?', corner: 'bl', closable: true,
-      onShow: () => layout(),
+      onShow: () => { layout(); makeRoom(); },
       onHide: () => { tr.tap = null; tr.res = null; game.extras.trace = null; layout(); }
     });
     trEls.how = TRACE_HOW; trEls.body = document.createElement('div'); trPanel.body.appendChild(trEls.body);
+    // a phone shows the headline first; "More" opens the rest (the body is rebuilt on every trace, so the click is caught here)
+    trEls.body.addEventListener('click', (e) => {
+      const b = e.target && e.target.closest ? e.target.closest('.hy-morebtn') : null; if (!b) return;
+      const open = trPanel.el.classList.toggle('hy-open'); b.textContent = open ? 'Less ▴' : 'More ▾';
+      layout(); if (open) makeRoom();
+    });
     trEls.body.innerHTML = '<div class="hy-work">Tap the map to choose a spot.</div>' + TRACE_HOW;
     addFold(trPanel);
 
     secPanel = ui.panel({
       id: 'hy-section', title: '✂️ Slice of the land', corner: 'bl', closable: true,
-      onShow: () => { layout(); },
+      onShow: () => { layout(); makeRoom(); },
       onHide: () => { sec.line = null; sec.prof = null; game.extras.section = null; layout(); }
     });
     const b = secPanel.body;
@@ -705,10 +752,10 @@
       g.on('lens', (id) => { if (chip) chip.classList.toggle('on', id === 'flow'); });
 
       // ---- keys
-      const sc = Creek.shortcuts;
-      sc.add({ key: 't', desc: 'Trace tool: where does the water from a spot go?', fn: () => { if (!g.ready) return false; ui.pickTool('trace'); } });
-      sc.add({ key: 'x', desc: 'Section tool: slice the land and see its side view', fn: () => { if (!g.ready) return false; ui.pickTool('section'); } });
-      sc.add({ key: 'w', desc: 'Water paths view on or off', fn: () => { if (!g.ready) return false; g.setLens(g.lensId === 'flow' ? 'map' : 'flow'); } });
+      const sc = Creek.shortcuts, off = () => !g.ready || riverOpen();          // the valley view covers the map: these keys are not ours then
+      sc.add({ key: 't', desc: 'Trace tool: where does the water from a spot go?', fn: () => { if (off()) return false; ui.pickTool('trace'); } });
+      sc.add({ key: 'x', desc: 'Section tool: slice the land and see its side view', fn: () => { if (off()) return false; ui.pickTool('section'); } });
+      sc.add({ key: 'w', desc: 'Water paths view on or off', fn: () => { if (off()) return false; g.setLens(g.lensId === 'flow' ? 'map' : 'flow'); } });
 
       // ---- saved with the ranch: the last trace spot and the slice line
       g.registerState('hydro', {
@@ -717,23 +764,35 @@
         },
         load(j) {
           if (!j || !g.ready) return;
-          if (j.trace && isFinite(j.trace.x) && isFinite(j.trace.y)) { tr.tap = { x: +j.trace.x, y: +j.trace.y }; tr.snap = true; if (j.trace.open) { trPanel.show(); } applyTrace(); }
-          else { if (trPanel.visible) trPanel.hide(); }
+          // only an open trace comes back: its shading on the map belongs to the panel, and a closed panel cannot clear it
+          if (j.trace && j.trace.open && isFinite(j.trace.x) && isFinite(j.trace.y)) { tr.tap = { x: +j.trace.x, y: +j.trace.y }; tr.snap = true; trPanel.show(); applyTrace(); }
+          else if (trPanel.visible) trPanel.hide();
+          else { tr.tap = null; tr.res = null; g.extras.trace = null; }
           if (j.section && [j.section.x0, j.section.y0, j.section.x1, j.section.y1].every(isFinite) && j.section.open) { sec.veUser = [1, 3, 6].indexOf(j.section.ve) >= 0 ? j.section.ve : 0; if (sec.veUser) sec.ve = sec.veUser; setSection(j.section); }
           else if (secPanel.visible) secPanel.hide();
         }
       });
 
+      // ---- the panels follow the screen furniture (the tray grows a row, the storm box and the report card come and go) and the other
+      //      lab panels (the storm graph takes the right-hand column). Observers, so nothing is measured every frame.
+      ro = window.ResizeObserver ? new ResizeObserver(() => { try { if (trPanel.visible || secPanel.visible) layout(); } catch (e) { /* ignore */ } }) : null;
+      if (ro) ['toolbar', 'stormbar', 'report', 'topbar2'].forEach((id) => { const e = document.getElementById(id); if (e) ro.observe(e); });
+      document.addEventListener('creek-lab-panels', () => { try { if (trPanel.visible || secPanel.visible) layout(); } catch (e) { /* ignore */ } });
+
       // ---- events
       g.on('frame', () => {
         try {
-          if (!g.ready) return;
+          if (!g.ready || riverOpen()) return;             // the valley view covers the map: no read-backs for a picture nobody sees
           const now = performance.now(), tp = trPanel.visible, sp = secPanel.visible;
-          if (tp || sp) { const th = document.getElementById('toolbar').offsetHeight; if (th !== lastTray) layout(); }
+          if (!ro && (tp || sp)) { const th = document.getElementById('toolbar').offsetHeight; if (th !== lastTray) layout(); }
           if (needs()) watch(now);
           if (tr.dirty && model && tp) applyTrace();
-          if (sp && sec.line && (sec.dirty || sec.ver !== g.terrainVersion)) {         // the chart follows the line, the land and the water as they change
-            if (now - sec.t > (sec.dirty ? 50 : g.storm ? 300 : g.stroke ? 120 : 60)) resample();
+          // the chart follows the line, the land and the water as they change. Each look is a GPU read-back and a repaint of the panel,
+          // so in a storm it waits some frames as well as some time: a slow device (long frames) would otherwise do it every frame.
+          secFrames++;
+          if (sp && sec.line && (sec.dirty || sec.ver !== g.terrainVersion)) {
+            const ms = sec.dirty ? 50 : g.storm ? 400 : g.stroke ? 120 : 60, frames = sec.dirty ? 0 : g.storm ? 6 : 2;
+            if (now - sec.t > ms && secFrames >= frames) { secFrames = 0; resample(); }
           }
         } catch (e) { console.error('[creek] hydro frame:', e); }
       });
@@ -749,6 +808,8 @@
       else if (flowOn) startBuild();
       if (secPanel && secPanel.visible && sec.line) { setSection(sec.line); }
       else if (!secPanel || !secPanel.visible) g.extras.section = null;
+      // the 3D view's controls (bottom right) may be made after this module's init: watch them too, so the slice moves aside
+      const v3 = document.querySelector('.panel[data-panel="view3d"]'); if (ro && v3) ro.observe(v3);
     }
   });
 

@@ -10,7 +10,9 @@
   'use strict';
   const C = Creek.CONFIG;
   const BATH = 0.3, POOL = 2500, CFS = 35.3147, MMH = 3.6e6;   // m3 in a bathtub, m3 in a big pool, cfs per m3/s, mm/hour per m/s
-  const MAXHIST = 12, CAP = 720, SAVEPTS = 160, LIVE_MS = 100, SCRUB_MS = 33;
+  // While a storm runs the graph redraws at most every LIVE_MS and every LIVE_FRAMES frames: on a slow device (frames of 100 ms and
+  // more) a time limit alone lets it redraw, and the page repaint it, on every frame, which slows the storm itself a lot.
+  const MAXHIST = 12, CAP = 720, SAVEPTS = 160, LIVE_MS = 150, LIVE_FRAMES = 3, SCRUB_MS = 33;
   const SEASON = { summer: 'Summer', fall: 'Fall', winter: 'Winter', spring: 'Spring' };
   const mod = Creek.stormgraph = { drawCount: 0, version: 1 };
 
@@ -80,7 +82,7 @@
   }
   const r3 = (v) => sig3(v);
   function pack(r) {
-    const k = Math.min(r.n, SAVEPTS), o = { size: r.size, tag: r.tag, year: r.year, season: r.season, peak: r3(r.peak), vol: r3(r.vol), rainVol: r3(r.rainVol), soak: +fin(r.soak).toFixed(4), partial: r.partial ? 1 : 0, t: [], rain: [], Qin: [], Qout: [] };
+    const k = Math.min(r.n, SAVEPTS), o = { size: r.size, tag: r.tag, year: r.year, season: r.season, peak: r3(r.peak), vol: r3(r.vol), rainVol: r3(r.rainVol), soak: +fin(r.soak).toFixed(4), partial: r.partial ? 1 : 0, upF: r.upF == null ? null : +fin(r.upF).toFixed(3), t: [], rain: [], Qin: [], Qout: [] };
     for (let i = 0; i < k; i++) {
       const j = k > 1 ? Math.round(i * (r.n - 1) / (k - 1)) : 0;
       o.t.push(+fin(r.t[j]).toFixed(1)); o.rain.push(r3(r.rain[j])); o.Qin.push(r3(r.Qin[j])); o.Qout.push(r3(r.Qout[j]));
@@ -93,6 +95,7 @@
       year: o.year | 0, season: o.season || '', rainVol: fin(o.rainVol), soak: fin(o.soak), vol: fin(o.vol), peak: fin(o.peak) };
     for (let i = 0; i < r.n; i++) { if (r.rain[i] == null) r.rain[i] = 0; if (r.Qin[i] == null) r.Qin[i] = 0; }
     stats(r); r.peak = Math.max(r.peak, r.seriesPeak); if (!(r.vol > 0)) r.vol = r.volSeries; r.partial = !!o.partial;
+    r.upF = typeof o.upF === 'number' && isFinite(o.upF) ? o.upF : null;
     return r;
   }
 
@@ -273,9 +276,10 @@
       for (let i = 0; i < na; i++) { const x = X(A.t[i]), y = Y(A.Qout[i]); if (i) c.lineTo(x, y); else c.moveTo(x, y); }
       c.stroke();
     }
-    // the peak
-    if (A.peak > 0 && na > 1) {
-      const px = X(A.peakT), py = Y(A.seriesPeak);
+    // the peak (a live record keeps the exact peak of every step; a finished one marks the highest point of its curve)
+    const pkQ = A.live ? A.peak : A.seriesPeak;
+    if (pkQ > 0 && na > 1) {
+      const px = X(A.peakT), py = Y(pkQ);
       c.beginPath(); c.arc(px, py, 5, 0, 6.2832); c.fillStyle = pal.gold; c.fill(); c.lineWidth = 1.6; c.strokeStyle = pal.ink; c.stroke();
       const txt = (A.live ? 'peak so far, ' : 'peak at ') + shortT(A.peakT), tw = c.measureText(txt).width;
       c.fillStyle = pal.ink; c.textAlign = px > x1 - tw / 2 - 4 ? 'right' : px < x0 + tw / 2 + 4 ? 'left' : 'center';
@@ -382,6 +386,8 @@
     } else if (g) {
       const d = compare(a, g); cls = d.cls; main = d.icon + ' ' + d.text;
       sub = 'Compared with ' + gName + '.' + (Math.abs(d.dv) >= 5 ? ' Total water out: ' + Math.round(Math.abs(d.dv)) + '% ' + (d.dv < 0 ? 'less' : 'more') + '.' : '');
+      // the same storm on the same land, but with less water from upstream, is not all the player's doing: say so
+      if (a.upF != null && g.upF != null && Math.abs(a.upF - g.upF) >= 0.005) sub += ' Neighbours upstream sent ' + (a.upF < g.upF ? 'less' : 'more') + ' water this time.';
     } else { main = 'Nothing to compare yet'; sub = 'After you change something, send the same size of storm again. The faint line will show the earlier one.'; }
     if (b._c !== cls) { b._c = cls; b.className = 'sg-badge ' + cls; }
     cached(D.badgeMain, main); cached(D.badgeSub, sub);
@@ -451,10 +457,13 @@
   function onStart(storm) {
     const L = live;
     L.active = true; L.size = storm.size; L.tag = storm.tag || null; L.year = game.year; L.season = game.season;
+    L.upF = typeof game.upstreamFactor === 'number' ? game.upstreamFactor : 1;      // neighbours upstream (module "life") make this smaller
     L.n = 1; L.t[0] = 0; L.rain[0] = 0; L.Qin[0] = 0; L.Qout[0] = 0;
     L.peak = L.peakT = L.vol = L.up = L.maxQin = L.maxRain = L.lt = L.lr = L.lqi = L.lqo = L.lastT = 0;
     L.every = (C.stormBurst + C.stormTail) / 450; L.nextRec = L.every; liveY = 0; cursorT = null;
-    if (set.get('stormgraph.auto', true) && !panel.visible) { panel.show(); autoOpened = true; }
+    keepBaseline();
+    // opening by itself never pushes away a panel the player is using (on a phone there is room for one)
+    if (set.get('stormgraph.auto', true) && !panel.visible && !inTheWay().length) { panel.show(); autoOpened = true; }
     renderAll();
   }
   function onStep(s) {
@@ -471,20 +480,31 @@
     live.active = false;
     const r = fromResult(res);
     if (r) {
-      r.year = game.year; r.season = game.season;
+      r.year = game.year; r.season = game.season; r.upF = live.upF;
       if (hist.indexOf(r) < 0) { hist.push(r); while (hist.length > MAXHIST) hist.shift(); }
       shown = r; cmp = null; armed = false;
     }
     renderAll();
   }
+  let framesSince = 0, ro = null;
   function onFrame() {
+    framesSince++;
     if (!dirty || !panel.visible || !live.active) return;
-    if (performance.now() - lastDraw >= LIVE_MS) tickDraw();
+    if (framesSince >= LIVE_FRAMES && performance.now() - lastDraw >= LIVE_MS) { framesSince = 0; tickDraw(); }
   }
   function onReset() {
     hist.length = 0; shown = null; cmp = null; armed = false; live.active = false; liveY = 0; cursorT = null;
     if (autoOpened && panel.visible) panel.hide();
     autoOpened = false; renderAll();
+  }
+  /** The story's "before" storm (game.baseline) is set after the story resets the ranch, which empties this list: put it back
+      first in the list, so it can be looked at and compared, and is shown when there is nothing newer. */
+  function keepBaseline() {
+    const b = game && game.baseline && fromResult(game.baseline);
+    if (!b || hist.indexOf(b) >= 0 || hist.some((r) => r.tag === 'baseline')) return false;
+    hist.unshift(b); while (hist.length > MAXHIST) hist.shift();
+    if (!shown && !live.active) shown = b;
+    return true;
   }
   function adopt() {
     // storms the game already holds that we have not seen (the module was switched on late)
@@ -501,6 +521,55 @@
     dirty = true; if (!scrubPending) { scrubPending = true; setTimeout(() => { scrubPending = false; if (dirty) tickDraw(); }, Math.max(0, SCRUB_MS - (performance.now() - lastDraw))); }
   }
   function scrubEnd(delay) { clearTimeout(scrubTimer); scrubTimer = setTimeout(() => { cursorT = null; dirty = true; want(0); }, delay); }
+
+  // ---------------------------------------------------------------- where the panel sits
+  // Measured from the real screen furniture, so it follows the HUD: on a phone across the screen under the storm buttons,
+  // on a wider screen in the right-hand column under the storm buttons; above the tool tray either way.
+  // The lab panels (this graph, Ranch health, Trace and Section) never sit on top of each other: the newest one wins.
+  const LAB = ['stormgraph', 'health', 'hy-trace', 'hy-section'];
+  const TOP_THINGS = '#topbar > *, #topbar2, #scalebar, #stormbar, #report', LOW_THINGS = '#toolbar, .panel[data-panel="view3d"]';
+  /** The visible elements matching `sel` that reach into the columns x0..x1 (page px; #app fills the page). */
+  function rectsIn(sel, x0, x1) {
+    const out = [];
+    document.querySelectorAll(sel).forEach((e) => { const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0 && r.left < x1 && r.right > x0) out.push(r); });
+    return out;
+  }
+  /** Right edge of the column the tip card uses (it is centred at the bottom, up to its max-width), read from its style so it is
+      known while the tip is hidden too, and the graph does not jump when a tip comes and goes. 0 if it cannot be told. */
+  function tipRight(vw) {
+    const h = document.getElementById('hint'), mw = h ? parseFloat(getComputedStyle(h).maxWidth) : NaN;
+    return isFinite(mw) ? Math.min(vw - 10, (vw + mw) / 2) : 0;
+  }
+  /** {x0, x1, top, floor}: the column the panel uses, and how far down it may reach. */
+  function spot() {
+    const app = document.getElementById('app'), vw = app.clientWidth, vh = app.clientHeight;
+    let w = vw < 600 ? vw - 20 : Math.min(410, vw - 20);
+    if (vw >= 600) { const tr = tipRight(vw); if (tr) w = Math.max(Math.min(w, vw - 20 - tr), Math.min(340, w)); }    // clear of the tip card when that costs little
+    const x0 = vw - 10 - w, x1 = vw - 10;
+    let top = 60, floor = vh - 10;
+    rectsIn(TOP_THINGS, x0, x1).forEach((r) => { top = Math.max(top, Math.round(r.bottom) + 8); });
+    rectsIn(LOW_THINGS, x0, x1).forEach((r) => { if (r.top > top) floor = Math.min(floor, Math.round(r.top) - 8); });
+    return { x0, x1, top, floor };
+  }
+  function place() {
+    if (!panel || !panel.visible) return;
+    const s = spot(), st = panel.el.style;
+    st.left = s.x0 + 'px'; st.right = 'auto'; st.width = (s.x1 - s.x0) + 'px'; st.top = s.top + 'px'; st.bottom = 'auto';
+    st.maxHeight = Math.max(140, s.floor - s.top) + 'px';
+  }
+  const overlap = (a, b) => a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2;
+  /** The other lab panels that the graph would cover if it reached all the way down its column. When there is room left of the
+      column for them, Trace and Section move aside by themselves (they listen for "creek-lab-panels"), so they do not count. */
+  function inTheWay() {
+    const s = spot(), r = { left: s.x0, right: s.x1, top: s.top, bottom: Math.max(s.floor, s.top + 140) }, roomy = s.x0 >= 350;
+    return LAB.filter((id) => { const p = ui.panels[id]; return id !== 'stormgraph' && !(roomy && id.indexOf('hy-') === 0) && p && p.visible && overlap(r, p.el.getBoundingClientRect()); });
+  }
+  /** Shown by the player: tell the other lab panels (the slice may get narrower to fit beside the graph), then close any it still covers. */
+  function makeRoom() {
+    try { document.dispatchEvent(new CustomEvent('creek-lab-panels', { detail: { id: 'stormgraph', open: true } })); } catch (e) { /* old browser: no matter */ }
+    const a = panel.el.getBoundingClientRect();
+    LAB.forEach((id) => { const p = ui.panels[id]; if (id !== 'stormgraph' && p && p.visible && overlap(a, p.el.getBoundingClientRect())) p.hide(); });
+  }
 
   // ---------------------------------------------------------------- set-up
   function resize(rect) {
@@ -519,8 +588,8 @@
       ui.styles(CSS());
       panel = ui.panel({
         id: 'stormgraph', title: '📈 Storm graph', corner: 'tr', closable: true,
-        onShow: () => { if (btn) btn.classList.add('on'); readPalette(); if (wrap) resize(wrap.getBoundingClientRect()); dirty = true; if (cw > 0) tickDraw(); },
-        onHide: () => { if (btn) btn.classList.remove('on'); autoOpened = false; }
+        onShow: () => { if (btn) btn.classList.add('on'); if (keepBaseline()) renderAll(); place(); makeRoom(); readPalette(); if (wrap) resize(wrap.getBoundingClientRect()); dirty = true; if (cw > 0) tickDraw(); },
+        onHide: () => { if (btn) btn.classList.remove('on'); autoOpened = false; try { document.dispatchEvent(new CustomEvent('creek-lab-panels', { detail: { id: 'stormgraph', open: false } })); } catch (e) { /* fine */ } }
       });
       buildDom(panel.body);
       // header: a line that shows when rolled up, the unit switch and the roll-up button
@@ -535,18 +604,29 @@
       fold.onclick = safe('roll up', () => { set.set('stormgraph.min', !set.get('stormgraph.min', false)); });
       head.insertBefore(fold, x);
       set.on('stormgraph.cfs', safe('units', () => { showUnit(); if (root) { renderAll(); } }));
-      set.on('stormgraph.min', safe('roll', () => { showFold(); want(0); }));
+      // rolled down again: it is big again and may cover something; rolled up: the slice may take the room back
+      set.on('stormgraph.min', safe('roll', (m) => {
+        showFold();
+        if (panel.visible) { if (!m) makeRoom(); else try { document.dispatchEvent(new CustomEvent('creek-lab-panels', { detail: { id: 'stormgraph', open: true } })); } catch (e) { /* fine */ } }
+        want(0);
+      }));
       showUnit(); showFold(); readPalette(); cached(D.stat, 'No storms yet');
 
       btn = ui.addButton({ slot: 'view', id: 'stormgraphBtn', label: '📈 Graph', title: 'Show or hide the storm graph', toggle: true,
         onClick: (on) => { if (on) { if (set.get('stormgraph.min', false) && !live.active) set.set('stormgraph.min', false); panel.show(); } else panel.hide(); autoOpened = false; } });
       ui.addMenuItem({ label: '📈 Storm graph', onClick: () => { if (set.get('stormgraph.min', false)) set.set('stormgraph.min', false); panel.show(); autoOpened = false; } });
-      Creek.shortcuts.add({ key: 'g', desc: 'Show or hide the storm graph', fn: () => { if (!game.ready) return false; panel.toggle(); autoOpened = false; } });
+      // (not while the valley view covers the ranch: the graph would open unseen behind it)
+      Creek.shortcuts.add({ key: 'g', desc: 'Show or hide the storm graph', fn: () => { if (!game.ready || (Creek.river && Creek.river.isOpen && Creek.river.isOpen())) return false; panel.toggle(); autoOpened = false; } });
       ui.addSetting({ id: 'stormgraph.auto', label: 'Open the storm graph when a storm starts', help: 'You can always open it with the Graph button.', type: 'toggle', default: true });
       ui.addSetting({ id: 'stormgraph.cfs', label: 'Graph in cubic feet per second (cfs)', help: 'Off shows cubic metres per second (m³/s).', type: 'toggle', default: false });
 
-      if (window.ResizeObserver) { new ResizeObserver(safe('resize', (es) => { resize(es[es.length - 1].contentRect); })).observe(wrap); }
-      window.addEventListener('resize', safe('window resize', () => { const r = wrap.getBoundingClientRect(); resize(r); }));
+      if (window.ResizeObserver) {
+        new ResizeObserver(safe('resize', (es) => { resize(es[es.length - 1].contentRect); })).observe(wrap);
+        // the storm box grows while a storm runs, the report card comes and goes, the tray grows a row: follow them
+        ro = new ResizeObserver(safe('place', () => place()));
+        ['stormbar', 'report', 'toolbar', 'topbar2'].forEach((id) => { const e = document.getElementById(id); if (e) ro.observe(e); });
+      }
+      window.addEventListener('resize', safe('window resize', () => { place(); const r = wrap.getBoundingClientRect(); resize(r); }));
       cv.addEventListener('pointerdown', safe('scrub', (e) => { try { cv.setPointerCapture(e.pointerId); } catch (_) { /* fine */ } scrubFrom(e); }));
       cv.addEventListener('pointermove', safe('scrub', (e) => { if (e.pointerType === 'mouse' || e.buttons) scrubFrom(e); }));
       cv.addEventListener('pointerup', safe('scrub', (e) => scrubEnd(e.pointerType === 'mouse' ? 0 : 1800)));
@@ -570,9 +650,13 @@
     },
 
     // A new world (first start, or after a detail-level change): the old storms belong to the old ranch.
+    // A storm that was cut off by the change never sends "stormEnd", so the live record is dropped unless a storm really runs.
     ready: function () {
-      if (live.active) return;
-      hist.length = 0; shown = null; cmp = null; armed = false; adopt(); renderAll();
+      if (live.active && game.storm) return;
+      live.active = false; liveY = 0; cursorT = null;
+      hist.length = 0; shown = null; cmp = null; armed = false; adopt(); renderAll(); place();
+      // the 3D view's controls (bottom right) may be made after this module's init: watch them too, the graph must stop above them
+      const v3 = document.querySelector('.panel[data-panel="view3d"]'); if (ro && v3) ro.observe(v3);
     }
   });
 
@@ -595,10 +679,10 @@
 
   // ---------------------------------------------------------------- look
   function CSS() { return [
-    // where the panel sits: below the storm buttons on a phone (it must not cover the tool tray), at the left on a wide screen
+    // where the panel sits until place() has measured the screen: under the storm buttons, across a phone or in the right-hand column
     '.panel.corner-tr[data-panel="stormgraph"]{left:10px;right:10px;width:auto;top:calc(280px + var(--safe-t));max-height:max(150px,calc(100% - 280px - 150px - var(--safe-b)));display:flex;flex-direction:column}',
     '.panel[data-panel="stormgraph"].hidden{display:none}',
-    '@media (min-width:600px){.panel.corner-tr[data-panel="stormgraph"]{left:10px;right:auto;width:410px;top:calc(130px + var(--safe-t));max-height:max(180px,calc(100% - 130px - 160px))}}',
+    '@media (min-width:600px){.panel.corner-tr[data-panel="stormgraph"]{left:auto;right:10px;width:min(410px,calc(100% - 20px));top:calc(262px + var(--safe-t));max-height:max(180px,calc(100% - 262px - 130px))}}',
     '.panel[data-panel="stormgraph"] .phead{flex:0 0 auto;gap:4px}',
     '.panel[data-panel="stormgraph"] .pbody{min-height:0;overflow:auto;overscroll-behavior:contain;padding:2px 10px 10px;-webkit-overflow-scrolling:touch}',
     '.panel[data-panel="stormgraph"].sg-min{max-height:none}',
