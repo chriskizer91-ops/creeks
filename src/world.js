@@ -223,7 +223,10 @@
       if (Math.abs(x - farm.x) < padW / 2 + 20 && Math.abs(y - farm.y) < padH / 2 + 20) fid = 0;
 
       const f = fid ? fields[fid - 1] : null, use = f ? f.use : 'wild';
-      const nz = vnoise(x / 25, y / 25), nz2 = vnoise(x / 8 + 5, y / 8);
+      // patches (woods and clearings, bare spots) come from value noise on a turned, gently warped grid, so their edges are organic, not boxes
+      const qx = x + 22 * (vnoise(x / 70 + 3.1, y / 70) - 0.5), qy = y + 22 * (vnoise(x / 70, y / 70 + 7.7) - 0.5);
+      const ru = 0.8 * qx - 0.6 * qy, rv = 0.6 * qx + 0.8 * qy;
+      const nz = vnoise(ru / 25, rv / 25), nz2 = vnoise(ru / 8 + 5, rv / 8);
       let cover = CV.PASTURE, growth = 0.5, som = f ? SOM_BASE[use] : 0.3;
       if (use === 'till') { cover = CV.CROP; growth = 0.85; }
       else if (use === 'pasture_cont') { cover = CV.PASTURE; growth = 0.35 + 0.15 * nz; if (nz2 > 0.78) { cover = CV.BARE; growth = 0; } }

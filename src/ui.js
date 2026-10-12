@@ -70,8 +70,9 @@
       const bx = card.querySelector('.btns');
       btns.forEach((b) => {
         const el = document.createElement('button'); el.className = 'go' + (b.alt ? ' alt' : ''); el.textContent = b.label;
-        el.onclick = () => { $('modal').classList.add('hidden'); resolve(b.value); }; bx.appendChild(el);
+        el.onclick = () => { ui._resolveCard = null; $('modal').classList.add('hidden'); resolve(b.value); }; bx.appendChild(el);
       });
+      ui._resolveCard = (v) => { ui._resolveCard = null; resolve(v); };      // for buttons a card builds in its own html
       $('modal').classList.remove('hidden'); card.scrollTop = 0;
       if (o.onShow) o.onShow(card);
     });
@@ -108,16 +109,28 @@
     ui.game = game;
     ui.buildTools();
     $('btnUndo').onclick = () => { if (!game.undo()) ui.toast('Nothing to undo.'); };
+    const undoState = () => { const n = game.sim && game.sim.undoDepth ? game.sim.undoDepth() : 0, b = $('btnUndo'); b.classList.toggle('dim', !n); b.title = n ? 'Undo the last change (Z) · ' + n + ' step' + (n > 1 ? 's' : '') + ' back' : 'Nothing to undo yet'; };
+    game.on('undo', undoState); game.on('terrain', undoState); game.on('ready', undoState); game.on('reset', undoState);
     ui.toggleLines = () => { game.contourOn = !game.contourOn; $('btnLines').classList.toggle('on', game.contourOn); };
     $('btnLines').onclick = () => ui.toggleLines();
     // the view button walks through game.lenses (the four built-in views, then any a module added)
-    $('btnLens').onclick = () => game.nextLens();
+    $('btnLens').onclick = (e) => { e.stopPropagation(); ui.viewMenu(); };
     game.on('lens', () => ui.lensChanged());
+    document.addEventListener('pointerdown', (e) => { const m = $('viewMenu'); if (!m.classList.contains('hidden') && !m.contains(e.target) && e.target !== $('btnLens')) m.classList.add('hidden'); }, true);
+    $('btnFit').onclick = () => ui.fit();
+    $('hintChip').onclick = () => { ui.hintTucked = false; ui.showHint(); };
     $('btnMenu').onclick = () => ui.menu();
     $('btnCash').onclick = () => ui.books();
-    document.querySelectorAll('.storm').forEach((b) => b.onclick = () => ui.onStorm && ui.onStorm(+b.dataset.size));
+    document.querySelectorAll('.storm').forEach((b) => {
+      b.addEventListener('click', () => $('stormbar').classList.remove('open'));
+      const S = C.storms[+b.dataset.size]; if (!S) return;
+      b.innerHTML = '<b>' + esc(S.label) + '</b><small>' + esc(S.depth30.toFixed(1)) + ' in of rain</small>';
+      const yrs = parseInt(S.label, 10) || 1;
+      b.title = S.name + ': ' + S.depth30.toFixed(1) + ' inches of rain in half an hour. A storm this big comes about once every ' + (yrs === 1 ? 'year' : yrs + ' years') + ', on average.';
+      b.onclick = () => ui.onStorm && ui.onStorm(+b.dataset.size);
+    });
     $('stormEnd').onclick = () => game.stopStorm();
-    $('hintHide').onclick = () => { $('hint').classList.add('hidden'); game.activeHint = null; };
+    $('hintHide').onclick = () => { ui.hintTucked = true; $('hint').classList.add('hidden'); game.activeHint = null; ui.showHintChip(); };
     $('hintNext').onclick = () => { ui.hintIdx++; ui.showHint(); };
     $('hintShow').onclick = () => { const h = ui.hintList[ui.hintIdx % ui.hintList.length]; if (h) { game.focusOn(h.x, h.y, Math.max(1.2, 400 / h.r / 4)); game.activeHint = h; } };
     $('hintTool').onclick = () => { const h = ui.hintList[ui.hintIdx % ui.hintList.length]; if (h) ui.pickTool(h.tool); };
@@ -132,21 +145,61 @@
     game.cbs.seasonChanged = () => ui.refreshSeasonBar();
     game.cbs.stormStart = (st) => { if (!st.turbo || true) $('stormProg').classList.remove('hidden'); ui.lockStorms(true); $('report').classList.add('hidden'); };
     game.cbs.stormEnd = (r) => { $('stormProg').classList.add('hidden'); ui.lockStorms(false); ui.refreshHints(); ui.stormEndHook ? ui.stormEndHook(r) : ui.report(r); };
+    game.cbs.stormDropped = () => { $('stormProg').classList.add('hidden'); ui.lockStorms(false); ui.stormEndHook = null; };
     game.cbs.scale = ui.scale;
     game.cbs.labels = ui.labels;
     game.cbs.error = (e) => { if ($('modal').classList.contains('hidden')) ui.card({ title: 'Something went wrong', text: String(e && e.message || e), buttons: [{ label: 'OK' }] }); };
     setInterval(ui.tick, 250);
+    ui.measureInsets(); window.addEventListener('resize', () => { ui.measureInsets(); game.resize(); });
+    $('stormHead').onclick = () => $('stormbar').classList.toggle('open');
+    if (window.innerWidth < 600) ui.hintTucked = true;            // on a phone the tips start tucked into a chip, so the map stays clear
     ui.updateTools();
+    ui.lensChanged(true);
     ui.addBuiltinSettings();
     ui.addBuiltinShortcuts();
   };
 
   /** The view button follows game.lenses[game.lensIdx]. */
-  ui.lensChanged = function () {
+  ui.lensChanged = function (quiet) {
     const g = ui.game, L = g.lenses[g.lensIdx], b = $('btnLens'); if (!L) return;
-    b.textContent = L.label; b.classList.toggle('on', g.lensIdx !== 0);
-    if (L.toast) ui.toast(L.toast);
+    b.textContent = L.label + ' ▾'; b.classList.toggle('on', g.lensIdx !== 0);
+    ui.legend(L.legend);
+    if (L.toast && !quiet && !L.legend) ui.toast(L.toast);
+    if (!$('viewMenu').classList.contains('hidden')) ui.viewMenu(true);
   };
+  /** The colour key for a view: {title, ramp: [css colours], left, right, note} or {title, items: [[colour, words]...]}, or null to hide it. */
+  ui.legend = function (lg) {
+    const el = $('legend');
+    if (!lg) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    let h = '<b>' + esc(lg.title || '') + '</b>';
+    if (lg.ramp) h += '<div class="lgramp" style="background:linear-gradient(90deg,' + lg.ramp.map(esc).join(',') + ')"></div><div class="lgends"><span>' + esc(lg.left || '') + '</span><span>' + esc(lg.right || '') + '</span></div>';
+    if (lg.items) h += lg.items.map((it) => '<div class="lgitem"><i style="background:' + esc(it[0]) + '"></i>' + esc(it[1]) + '</div>').join('');
+    if (lg.note) h += '<small>' + esc(lg.note) + '</small>';
+    el.innerHTML = h; el.classList.remove('hidden');
+  };
+  /** The view menu under the View chip: every view with a line about what it shows. */
+  ui.viewMenu = function (refresh) {
+    const g = ui.game, m = $('viewMenu');
+    if (!refresh && !m.classList.contains('hidden')) { m.classList.add('hidden'); return; }
+    m.innerHTML = '<div class="vmhead">What the map shows</div>';
+    g.lenses.forEach((L, i) => {
+      const b = document.createElement('button'); b.className = 'vmitem' + (i === g.lensIdx ? ' on' : ''); b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', i === g.lensIdx ? 'true' : 'false');
+      b.innerHTML = '<span class="vml">' + esc(L.label) + '</span><small>' + esc(L.desc || L.toast || '') + '</small>';
+      b.onclick = () => { g.setLens(i); m.classList.add('hidden'); };
+      m.appendChild(b);
+    });
+    const r = $('btnLens').getBoundingClientRect(), a = $('app').getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(r.left - a.left, a.width - 308)) + 'px'; m.style.top = (r.bottom - a.top + 6) + 'px';
+    m.classList.remove('hidden');
+  };
+  /** How much of the screen the furniture covers, so "the whole ranch" fits in what is left (game.insets). */
+  ui.measureInsets = function () {
+    const g = ui.game, a = $('app').getBoundingClientRect(), tb = $('toolbar').getBoundingClientRect(), row = $('topbar2').getBoundingClientRect();
+    const wide = a.width >= 800;
+    g.insets = { top: wide ? 12 : Math.max(0, row.bottom - a.top), bottom: Math.max(0, a.bottom - tb.top) + 6, left: 0, right: 0 };
+  };
+  /** Back to the whole ranch (the 3D view frames it its own way). */
+  ui.fit = function () { const g = ui.game; if (!g.ready) return; if (g.provider()) g.focusOn(C.mapW / 2, C.mapH / 2, g.fitScale); else g.fitCamera(); };
 
   // Keys that work everywhere (the dispatcher itself is in core.js: it skips typing and open cards)
   ui.addBuiltinShortcuts = function () {
@@ -157,6 +210,8 @@
     sc.add({ key: 'z', desc: 'Undo', fn: () => { if (!g.ready) return false; if (!g.undo()) ui.toast('Nothing to undo.'); } });
     sc.add({ key: 'l', desc: 'Contour lines on or off', fn: () => { if (!g.ready) return false; ui.toggleLines(); } });
     sc.add({ key: 'v', desc: 'Next view (map, soil, flood...)', fn: () => { if (!g.ready) return false; g.nextLens(); } });
+    sc.add({ key: '0', desc: 'Show the whole ranch', fn: () => { if (!g.ready) return false; ui.fit(); } });
+    sc.add({ key: 'Escape', hidden: true, desc: 'Close the view menu', fn: () => { const m = $('viewMenu'); if (m.classList.contains('hidden')) return false; m.classList.add('hidden'); } });
     sc.add({ key: '?', desc: 'Show this list of keys', fn: () => { ui.showShortcuts(); } });
   };
   ui.showShortcuts = function () {
@@ -169,10 +224,15 @@
     const g = ui.game, st = g.storm; if (!st) return;
     const pct = Math.min(1, st.t / (C.stormBurst + C.stormTail));
     $('stormBar').style.width = (pct * 100) + '%';
-    const phase = g.paused ? 'Paused' : st.t < C.stormBurst ? 'Raining' : 'Draining';
+    $('stormBar').classList.toggle('drain', st.t >= C.stormBurst);
+    const phase = g.paused ? 'Paused' : st.t < C.stormBurst ? '🌧️ Raining' : '💧 Draining';
     $('stormLabel').textContent = phase + ' · ' + Math.round(pct * 100) + '%';
   };
-  setInterval(() => { const g = ui.game; if (g && g.contourStep) $('linesText').textContent = g.contourOn ? 'Lines every ' + g.contourStep + ' m' : 'Lines off'; }, 500);
+  setInterval(() => {
+    const g = ui.game; if (!g || !g.contourStep) return;
+    const t = g.contourOn ? '<span class="wide">Lines every </span>' + g.contourStep + ' m' : 'Lines off', el = $('linesText');
+    if (el.innerHTML !== t) el.innerHTML = t;
+  }, 500);
 
   // ---------------------------------------------------------------- tools
   ui.pickTool = function (id) {
@@ -182,14 +242,15 @@
     if (h && !seen(t.card)) {
       seen(t.card, true);
       ui.card({ img: h.img, square: h.square, title: h.title, text: h.text, buttons: [{ label: 'Got it' }] });
-    } else if (t && t.help) ui.toast(t.help);
+    }
   };
   /** (Re)build the tool tray from Creek.TOOLS. */
   ui.buildTools = function () {
     const tools = $('tools'); tools.innerHTML = '';
     Creek.TOOLS.forEach((t, i) => {
       const b = document.createElement('button'); b.className = 'tool'; b.dataset.id = t.id; b.title = t.label + (i < 9 ? ' (key ' + (i + 1) + ')' : '');
-      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = t.icon; b.appendChild(ic); b.appendChild(document.createTextNode(t.label));
+      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = t.icon; b.appendChild(ic);
+      const lb = document.createElement('span'); lb.className = 'lb'; lb.textContent = t.label; b.appendChild(lb);
       b.onclick = () => ui.pickTool(t.id); tools.appendChild(b);
     });
   };
@@ -206,11 +267,14 @@
       t.opts.forEach((o, k) => {
         const b = document.createElement('button'); b.textContent = o.icon + ' ' + o.label; b.className = (g.optIdx[t.id] || 0) === k ? 'sel' : '';
         b.title = o.long || '';
-        b.onclick = () => { g.optIdx[t.id] = k; g.sizeIdx = Math.min(g.sizeIdx, (g.cur().sizes || [0]).length - 1); ui.updateTools(); ui.toast(o.long ? o.long + (C.uses[o.id] && C.uses[o.id].hint ? ': ' + C.uses[o.id].hint : '') : o.label); };
+        b.onclick = () => { g.optIdx[t.id] = k; g.sizeIdx = Math.min(g.sizeIdx, (g.cur().sizes || [0]).length - 1); ui.updateTools(); };
         vb.appendChild(b);
       });
     } else vb.classList.add('hidden');
     ui.buildSizes();
+    const d = g.cur(), help = $('toolHelp');
+    help.innerHTML = (d.help ? esc(d.help) : '') + (d.cost ? ' <span class="cost">' + esc(d.cost.charAt(0).toUpperCase() + d.cost.slice(1)) + '</span>' : '') +
+      (!g.canUse(g.tool) ? ' <span class="cost">' + esc(g.whyLocked(g.tool)) + '</span>' : '');
   };
   ui.buildSizes = function () {
     const g = ui.game, d = g.cur(), box = $('sizes'); box.innerHTML = '';
@@ -218,22 +282,27 @@
     box.style.visibility = 'visible';
     d.sizes.forEach((r, k) => {
       const b = document.createElement('button'); b.textContent = r + ' m'; b.className = k === Math.min(g.sizeIdx, d.sizes.length - 1) ? 'on' : '';
+      b.title = 'Brush ' + Math.round(r * 2 * 3.281) + ' ft across';
       b.onclick = () => { g.sizeIdx = k; ui.buildSizes(); }; box.appendChild(b);
     });
   };
 
   ui.probe = function (d) {
     const el = $('probe'); if (!d) { el.classList.add('hidden'); return; }
-    const g = ui.game, i = d.info, covers = ['Bare soil', 'Pasture', 'Native prairie', 'Trees', 'Roof', 'Road', 'Willow', 'Cover crop', 'Check dam', 'Crop field', 'Pond'];
-    const rock = i.h - i.bed < 0.03, f = i.field && g.fields[i.field - 1];
-    let html = '<b>Height ' + i.h.toFixed(2) + ' m</b>' + (f ? '<br>' + f.name + ' · ' + C.uses[f.use].short : '') + '<br>' + covers[i.cover] +
-      (i.growth > 0 && [1, 2, 3, 6, 7, 9].indexOf(i.cover) >= 0 ? ' (' + Math.round(i.growth * 100) + '% grown)' : '') + '<br>' +
-      (rock ? 'Limestone' : (i.soil ? 'Sandy loam' : 'Black clay') + ', ' + Math.round((i.h - i.bed) * 100) + ' cm over limestone') +
-      '<br>Organic matter ' + Math.round(i.som * 100) + '%';
-    if (i.depth > 0.004) html += '<br>Water ' + Math.round(i.depth * 100) + ' cm deep, ' + i.speed.toFixed(1) + ' m/s';
+    const g = ui.game, i = d.info, covers = ['Bare soil', 'Pasture', 'Native prairie', 'Trees', 'Roof', 'Road', 'Willows', 'Cover crop', 'Check dam', 'Crop', 'Pond'];
+    const rock = i.h - i.bed < 0.03, f = i.field && g.fields[i.field - 1], u = f && C.uses[f.use];
+    const grown = i.growth > 0 && [1, 2, 3, 6, 7, 9].indexOf(i.cover) >= 0 ? ', ' + Math.round(i.growth * 100) + '% grown' : '';
+    let html = '<b>' + (rock ? 'Bare limestone' : (i.soil ? 'Sandy loam' : 'Black clay') + ', ' + Math.round((i.h - i.bed) * 100) + ' cm over rock') + '</b>' +
+      (f ? '<br>' + esc(f.name) + (f.kind === 'field' && u ? ' · ' + u.icon + ' ' + esc(u.short) : '') : '') +
+      '<br>' + covers[i.cover] + grown + (rock ? '' : ' · organic matter ' + Math.round(i.som * 100) + '%') +
+      '<br>Ground ' + i.h.toFixed(2) + ' m high (' + Math.round(i.h * 3.281) + ' ft)';
+    if (i.depth > 0.004) html += '<br>💧 Water ' + (i.depth >= 1 ? i.depth.toFixed(1) + ' m' : Math.round(i.depth * 100) + ' cm') + ' deep, moving ' + i.speed.toFixed(1) + ' m/s';
     el.innerHTML = html; el.classList.remove('hidden');
-    const r = $('app').getBoundingClientRect();
-    el.style.left = Math.min(d.x + 16, r.width - 240) + 'px'; el.style.top = Math.max(d.y - 110, 60) + 'px';
+    const r = $('app').getBoundingClientRect(), w = el.offsetWidth || 230, h = el.offsetHeight || 100;
+    let x = d.x + 18, y = d.y - h - 14;                         // above and to the right of the finger, flipped to stay on screen
+    if (x + w > r.width - 8) x = d.x - w - 18;
+    if (y < 60) y = d.y + 22;
+    el.style.left = Math.max(8, x) + 'px'; el.style.top = Math.max(8, Math.min(y, r.height - h - 8)) + 'px';
   };
 
   ui.scale = function (s) {
@@ -277,27 +346,35 @@
   // ---------------------------------------------------------------- hints
   ui.hintList = []; ui.hintIdx = 0;
   ui.refreshHints = function () { ui.hintList = ui.game.computeHints(); ui.hintIdx = 0; ui.showHint(); };
+  ui.showHintChip = function () {
+    const n = ui.hintList.length, c = $('hintChip');
+    c.textContent = '💡 Tips' + (n ? ' (' + n + ')' : ''); c.classList.toggle('hidden', !n || !$('hint').classList.contains('hidden'));
+  };
   ui.showHint = function () {
-    const g = ui.game, l = ui.hintList; if (!l.length) { $('hint').classList.add('hidden'); g.activeHint = null; return; }
+    const g = ui.game, l = ui.hintList; if (!l.length) { $('hint').classList.add('hidden'); g.activeHint = null; ui.showHintChip(); return; }
+    if (ui.hintTucked) { $('hint').classList.add('hidden'); g.activeHint = null; ui.showHintChip(); return; }
     const h = l[ui.hintIdx % l.length];
     g.hintsShown[h.id] = (g.hintsShown[h.id] || 0) + 0.5;
     $('hintText').textContent = '💡 ' + h.text; g.activeHint = null;
     const t = Creek.TOOLS.find(x => x.id === h.tool), bt = $('hintTool');
     if (t && g.canUse(t.id)) { bt.textContent = 'Try: ' + t.label; bt.classList.remove('hidden'); } else bt.classList.add('hidden');
-    $('hint').classList.remove('hidden');
+    $('hintNext').classList.toggle('hidden', l.length < 2);
+    $('hint').classList.remove('hidden'); ui.showHintChip();
   };
 
   // ---------------------------------------------------------------- storm report and the ranch books
   const acres = (ha) => ha * 2.471;
   ui.report = function (r) {
     if (!r) return;
-    const el = $('report'), S = C.storms[r.size];
-    el.innerHTML = '<button class="x">✕</button><h4>' + S.label + ' storm</h4>' +
-      'Soaked in: <b>' + Math.round(r.soakShare * 100) + '%</b> of the rain<br>' +
-      'Peak flow leaving: <b>' + Math.round(r.peakOut) + ' m³/s</b><br>' +
-      'Soil washed off: <b>' + Math.round(r.soilLost * 1.3).toLocaleString() + ' tons</b><br>' +
-      'Flooded: <b>' + acres(r.floodHa).toFixed(0) + ' acres</b>' +
-      '<br><button class="go more">Ranch books</button>';
+    const el = $('report'), S = C.storms[r.size], soak = Math.max(0, Math.min(1, r.soakShare));
+    const row = (k, v) => '<div class="rrow"><span>' + k + '</span><b>' + v + '</b></div>';
+    el.innerHTML = '<button class="x" aria-label="Close">✕</button><h4>' + esc(S.label) + ' storm</h4>' +
+      row('Rain soaked in', Math.round(soak * 100) + '%') +
+      '<div class="rbar" title="Green: soaked into the soil. Blue: ran off."><i style="width:' + (soak * 100).toFixed(1) + '%;background:var(--moss)"></i><i style="flex:1;background:var(--water)"></i></div>' +
+      row('Peak flow leaving', Math.round(r.peakOut).toLocaleString() + ' m³/s') +
+      row('Soil washed off', Math.round(r.soilLost * 1.3).toLocaleString() + ' tons') +
+      row('Land flooded', acres(r.floodHa).toFixed(0) + ' acres') +
+      '<button class="go more">Ranch books</button>';
     el.classList.remove('hidden');
     el.querySelector('.x').onclick = () => el.classList.add('hidden');
     el.querySelector('.more').onclick = () => ui.books();
@@ -328,12 +405,20 @@
   // ---------------------------------------------------------------- menu & picture book
   ui.menu = async function () {
     const g = ui.game;
-    const extra = ui.menuItems.map((m, i) => ({ label: m.label, value: 'mod:' + i, alt: m.alt !== false }));
-    const v = await ui.card({
-      title: C.ranchName, text: 'Detail: ' + C.levelNames[g.level] + '. ' + (ui.mode === 'story' ? 'You are playing the story.' : 'You are in free play.'),
-      buttons: [{ label: 'Story: the first years', value: 'story' }, { label: 'Free play', value: 'free' }, { label: 'Change detail level', value: 'level', alt: true }, { label: 'Picture book', value: 'book', alt: true }, { label: 'Settings', value: 'settings', alt: true }]
-        .concat(extra, [{ label: 'Start the ranch over', value: 'reset', alt: true }, { label: 'Close', value: 'close', alt: true }])
+    const btn = (label, value, cls) => '<button class="go ' + (cls || 'alt') + '" data-v="' + esc(value) + '">' + esc(label) + '</button>';
+    // module items sit between Settings and "Start the ranch over" (docs/EXTENSION_API.md)
+    const html = '<div class="menugrid">' +
+      '<div class="sep">Play</div>' + btn('📖 Story: the first years', 'story', ' ') + btn('🧭 Free play', 'free', ' ') +
+      '<div class="sep">More</div>' + btn('🖼️ Picture book', 'book') + btn('⚙️ Settings', 'settings') + ui.menuItems.map((m, i) => btn(m.label, 'mod:' + i)).join('') +
+      '<div class="sep">Ranch</div>' + btn('🔍 Detail level', 'level') + btn('↺ Start the ranch over', 'reset') +
+      '</div>';
+    let picked = 'close';
+    const v0 = await ui.card({
+      title: C.ranchName, text: (ui.mode === 'story' ? 'You are playing the story.' : 'You are in free play.') + ' Detail: ' + C.levelNames[g.level] + '.', html,
+      buttons: [{ label: 'Close', value: 'close', alt: true }],
+      onShow: (card) => card.querySelectorAll('.menugrid button').forEach((b) => { b.onclick = () => { picked = b.dataset.v; ui.closeCard(); ui._resolveCard && ui._resolveCard('menu'); }; })
     });
+    const v = v0 === 'menu' ? picked : v0;
     if (v === 'story') Creek.story.start(); else if (v === 'free') Creek.story.free(); else if (v === 'level') ui.levelPicker(); else if (v === 'book') ui.book(); else if (v === 'settings') ui.settings(); else if (v === 'reset') { g.resetMap(); ui.toast('The ranch is back as you found it.'); ui.refreshHints(); ui.refreshSeasonBar(); }
     else if (typeof v === 'string' && v.indexOf('mod:') === 0) { const m = ui.menuItems[+v.slice(4)]; if (m && m.onClick) g._guard('menu item "' + m.label + '"', () => m.onClick(g, ui)); }
   };

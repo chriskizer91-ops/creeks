@@ -145,7 +145,7 @@
 
   // ================================================================ styles
   const STYLES = [
-    '.co-tour{position:absolute;inset:0;z-index:15;pointer-events:none}.co-tour.co-away{display:none}#app.co-touring #hint,#app.co-touring #report{visibility:hidden}',
+    '.co-tour{position:absolute;inset:0;z-index:15;pointer-events:none}.co-tour.co-away{display:none}#app.co-touring #hint,#app.co-touring #hintChip,#app.co-touring #report,#app.co-touring #legend{visibility:hidden}',
     '.co-dim{position:absolute;inset:0;background:rgba(40,28,16,.62);pointer-events:auto}',
     '.co-shield{position:absolute;pointer-events:auto;background:transparent}',
     '.co-ring{position:absolute;border:3px solid var(--gold);border-radius:16px;pointer-events:none;animation:co-pulse 1.8s ease-in-out infinite}',
@@ -201,6 +201,8 @@
   const unionBox = (hs) => hs.reduce((u, h) => (u ? { l: Math.min(u.l, h.b.l), t: Math.min(u.t, h.b.t), r: Math.max(u.r, h.b.r), b: Math.max(u.b, h.b.b) } : { l: h.b.l, t: h.b.t, r: h.b.r, b: h.b.b }), null);
 
   const rowScrolls = () => { const r = $('topbar2'); return !!r && r.scrollWidth > r.clientWidth + 2; };
+  const trayScrolls = () => { const r = $('tools'); return !!r && r.scrollWidth > r.clientWidth + 2; };
+  const folded = () => { const s = document.querySelector('#stormbar .storm'); return !!s && s.getBoundingClientRect().height < 4; };     // the phone layout folds the storm buttons away
   const SPECS = [
     { key: 'map', place: 'map-bottom', holes: () => [{ b: mapBox(), shield: true }],
       enter() { if (!game.contourOn && ui.toggleLines) ui.toggleLines(); },
@@ -209,11 +211,11 @@
       enter() { const tray = $('tools'), el = document.querySelector('.tool[data-id="look"]'); if (tray && el) tray.scrollLeft = 0; if (game.canUse('look')) game.setTool('look'); T.probed = false; },
       text: () => (T.probed ? 'Nice! The Look tool tells you how high the ground is. Tap a spot on the same brown line and you get the same height.' : 'Try it! Tap the map with the Look tool 👆. It tells you how high the ground is. The brown line through that spot lights up.') },
     { key: 'storm', place: 'below', holes: () => [{ b: boxOf('#stormbar'), shield: true }],
-      text: () => 'These buttons send a storm: small, big or huge. Nothing can break for good. Watch where the water goes, then fix what it shows you.' },
+      text: () => (folded() ? 'Tap Storm to send one: small, big or huge.' : 'These buttons send a storm: small, big or huge.') + ' Nothing can break for good. Watch where the water goes, then fix what it shows you.' },
     { key: 'tools', place: 'above', holes: () => [{ b: boxOf('#toolbar'), shield: true }],
-      text: () => 'These are your tools. Swipe sideways to see them all. Tap a tool, then drag on the map. Undo is on the right if you change your mind.' },
+      text: () => 'These are your tools. Tap a tool, then drag or tap on the map. The line under them says what the tool does and what it costs. Undo is on the right if you change your mind.' + (trayScrolls() ? ' Swipe the tools sideways to see them all.' : '') },
     { key: 'views', place: 'below', holes: () => [{ b: boxOf('#topbar2'), shield: true }],
-      text: () => 'Lines turns the brown lines on and off. View switches the picture: soil health, soil moved, flood depth' + (document.getElementById('view3d') ? '. The 3D button tilts the map so you can see the hills.' : '.') + (rowScrolls() ? ' Swipe this row sideways to find more buttons, like Lessons.' : '') },
+      text: () => 'The first button changes what the map shows: soil health, where soil moved, how deep the flood got, and more. Lines turns the brown contour lines on and off' + (document.getElementById('view3d') ? '. The 3D button tilts the map so you can see the hills.' : '.') + (rowScrolls() ? ' Swipe this row sideways to find more buttons, like Lessons.' : '') },
     { key: 'money', place: 'below', holes: () => [{ b: boxOf('#btnMenu'), shield: true }, { b: boxOf('#btnCash'), shield: true }],
       text: () => 'This is your money. Tap it to open the ranch books. The ☰ menu has Map school, where you learn to read the map, and Show me around to see this again.', last: true }
   ];
@@ -442,11 +444,12 @@
     el.querySelector('span').textContent = done ? q.cheer : q.stat();
     placeTask();
   }
-  function placeTask() {
+  function placeTask() {                // under the left column (the colour key and the storm report), or where that column starts
     if (!taskEl || taskEl.classList.contains('hidden')) return;
-    const r = $('report'); let top = 126;
-    if (r && !r.classList.contains('hidden')) top = Math.max(top, r.getBoundingClientRect().bottom + 6);
-    taskEl.style.top = top + 'px';
+    const col = $('leftcol'), a = $('app').getBoundingClientRect(); let top = 144;
+    if (col) { const r = col.getBoundingClientRect(); top = r.height > 2 ? r.bottom + 8 - a.top : r.top - a.top; }
+    else { const r = $('report'); if (r && !r.classList.contains('hidden')) top = Math.max(top, r.getBoundingClientRect().bottom + 6 - a.top); }
+    const px = Math.round(top) + 'px'; if (taskEl.style.top !== px) taskEl.style.top = px;
   }
   function openLessons(id) {
     if (!panel) return;
@@ -583,10 +586,10 @@
       lessonsBtn = ui.addButton({ slot: 'view', id: 'coachLessons', label: '🎓 Lessons', title: 'Map school: short lessons on reading the map', toggle: true,
         onClick: (on) => { if (on) openLessons(activeId && !isDone(lesson(activeId)) ? activeId : null); else panel.hide(); } });
 
-      ui.addMenuItem({ label: 'Show me around', onClick: () => requestTour() });
-      ui.addMenuItem({ label: 'Map school', onClick: () => openLessons() });
-      ui.addMenuItem({ label: 'How it works', onClick: () => showGlossary() });
-      if (Creek.shortcuts && ui.showShortcuts) ui.addMenuItem({ label: 'Keyboard shortcuts', onClick: () => ui.showShortcuts() });
+      ui.addMenuItem({ label: '👋 Show me around', onClick: () => requestTour() });
+      ui.addMenuItem({ label: '🎓 Map school', onClick: () => openLessons() });
+      ui.addMenuItem({ label: '📘 How it works', onClick: () => showGlossary() });
+      if (Creek.shortcuts && ui.showShortcuts) ui.addMenuItem({ label: '⌨️ Keyboard shortcuts', onClick: () => ui.showShortcuts() });
       if (Creek.shortcuts) Creek.shortcuts.add({ key: 'Escape', hidden: true, desc: 'Skip the tour', fn: () => { if (!T.active) return false; endTour(true); } });
 
       game.registerState('coach', {

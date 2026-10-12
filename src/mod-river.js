@@ -282,24 +282,51 @@
 
   // ------------------------------------------------------------------------------------------------
   // Drawing the map
+  // value noise for the land-cover pattern of the valley picture (deterministic, so the valley looks the same every visit)
+  function hash2(ix, iy) { let h = (ix * 374761393 + iy * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
+  function vnoise(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+    const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+  /** The valley seen from the air, at 20 m a pixel: grassland and pasture on the hills, woods on the steep breaks and in patches,
+      a patchwork of fields on the valley floor and a band of trees along the creeks, all with the sun from the north-west. */
   function makeBackdrop() {
-    const dem = S.dem = R.buildDem(S.valley, 40), nx = dem.nx, ny = dem.ny, z = dem.z;
+    const dem = S.dem = R.buildDem(S.valley, 40), dnx = dem.nx, dny = dem.ny, z = dem.z, cell = dem.cell;
+    const up = 2, nx = dnx * up, ny = dny * up, px = cell / up;
     const cv = document.createElement('canvas'); cv.width = nx; cv.height = ny;
     const g = cv.getContext('2d'), img = g.createImageData(nx, ny), d = img.data;
-    let zmin = 1e9, zmax = -1e9; for (let i = 0; i < z.length; i++) { zmin = Math.min(zmin, z[i]); zmax = Math.max(zmax, z[i]); }
-    const lx = -0.55, ly = -0.65, lz = 0.52, ll = Math.hypot(lx, ly, lz), L = [lx / ll, ly / ll, lz / ll], ex = 5;
+    const bil = (arr, x, y) => {            // x, y in DEM cells
+      const fx = clamp(x - 0.5, 0, dnx - 1.001), fy = clamp(y - 0.5, 0, dny - 1.001), i = Math.floor(fx), j = Math.floor(fy), a = fx - i, b = fy - j, k = j * dnx + i;
+      return (arr[k] * (1 - a) + arr[k + 1] * a) * (1 - b) + (arr[k + dnx] * (1 - a) + arr[k + dnx + 1] * a) * b;
+    };
+    const L = (() => { const lx = -0.55, ly = -0.65, lz = 0.52, ll = Math.hypot(lx, ly, lz); return [lx / ll, ly / ll, lz / ll]; })(), ex = 4;
+    const grass = [174, 162, 112], pasture = [152, 148, 94], woods = [60, 82, 46], wet = [126, 146, 84];
+    const fieldCols = [[108, 128, 62], [170, 154, 112], [124, 108, 86], [140, 150, 80], [182, 166, 116]];
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-      const il = Math.max(i - 1, 0), ir = Math.min(i + 1, nx - 1), jt = Math.max(j - 1, 0), jb = Math.min(j + 1, ny - 1);
-      const gx = (z[j * nx + ir] - z[j * nx + il]) / ((ir - il) * dem.cell) * ex, gy = (z[jb * nx + i] - z[jt * nx + i]) / ((jb - jt) * dem.cell) * ex;
-      const nl = Math.hypot(gx, gy, 1), sh = clamp((-gx * L[0] - gy * L[1] + L[2]) / nl, 0, 1.2);
-      const k = j * nx + i, e = (z[k] - zmin) / (zmax - zmin), fl = dem.floor[k];
-      const hill = mix([216, 203, 156], [182, 164, 124], clamp(e * 1.4, 0, 1)), meadow = [186, 206, 138];
-      const col = mix(hill, meadow, fl), lum = 0.55 + 0.62 * sh;
-      d[k * 4] = clamp(col[0] * lum, 0, 255); d[k * 4 + 1] = clamp(col[1] * lum, 0, 255); d[k * 4 + 2] = clamp(col[2] * lum, 0, 255); d[k * 4 + 3] = 255;
+      const x = (i + 0.5) * px, y = (j + 0.5) * px, cx = (i + 0.5) / up, cy = (j + 0.5) / up;
+      const h = bil(z, cx, cy), hx = bil(z, cx + 0.5, cy) - bil(z, cx - 0.5, cy), hy = bil(z, cx, cy + 0.5) - bil(z, cx, cy - 0.5);
+      const gx = hx / cell * ex, gy = hy / cell * ex, slope = Math.hypot(hx, hy) / cell, fl = bil(dem.floor, cx, cy);
+      const sh = clamp((-gx * L[0] - gy * L[1] + L[2]) / Math.hypot(gx, gy, 1), 0, 1.25);
+      const n1 = vnoise(x / 260, y / 260), n2 = vnoise(x / 150 + 7, y / 150) * 0.75 + vnoise(x / 45, y / 45 + 5) * 0.25, n3 = vnoise(x / 34 + 3, y / 34 + 9);
+      // the hills: grass and pasture, woods where it is steep or in scattered mottes
+      let col = mix(grass, pasture, clamp(n1 * 1.4 - 0.2, 0, 1));
+      const wood = clamp((slope - 0.035) * 30, 0, 1) * 0.8 + clamp((n2 - 0.68) * 12, 0, 1) * 0.85;
+      col = mix(col, woods, clamp(wood, 0, 1) * (0.75 + 0.25 * n3));
+      // the valley floor: fields in long strips, a fringe of trees along the creek
+      if (fl > 0.02) {
+        const fu = Math.floor((x * 0.96 + y * 0.28) / 160), fv = Math.floor((-x * 0.28 + y * 0.96) / 110), fc = fieldCols[Math.floor(hash2(fu, fv) * fieldCols.length)];
+        let fld = mix(fc, wet, 0.25 * n3);
+        const rip = clamp((fl - 0.82) * 6, 0, 1);
+        fld = mix(fld, woods, rip * (0.65 + 0.35 * n3));
+        col = mix(col, fld, clamp(fl * 1.6, 0, 1));
+      }
+      const lum = (0.62 + 0.55 * sh) * (0.94 + 0.12 * n3), k = (j * nx + i) * 4;
+      d[k] = clamp(col[0] * lum, 0, 255); d[k + 1] = clamp(col[1] * lum, 0, 255); d[k + 2] = clamp(col[2] * lum, 0, 255); d[k + 3] = 255;
     }
     g.putImageData(img, 0, 0);
     S.backdrop = cv;
-    S.contours = contourPaths(z, nx, ny, dem.cell, 20 / FT, 100 / FT, 70);
+    S.contours = contourPaths(z, dnx, dny, cell, 20 / FT, 100 / FT, 70);
   }
 
   /** Contour lines of a height grid (marching squares). Heights in metres; a thin line every `step`, a thick one every `majorStep`.
@@ -334,8 +361,9 @@
     const z = new Float32Array(nx * ny), cvr = new Uint8Array(nx * ny);
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const k = ((j * st) * nx0 + i * st) * 4; z[j * nx + i] = T[k]; cvr[j * nx + i] = Math.round(T[k + 2]); }
     const CV = C.COVER;
-    const pal = {}; pal[CV.BARE] = [204, 184, 140]; pal[CV.PASTURE] = [170, 190, 108]; pal[CV.PRAIRIE] = [188, 186, 104]; pal[CV.TREE] = [92, 128, 76]; pal[CV.ROOF] = [150, 140, 130]; pal[CV.ROAD] = [170, 160, 140];
-    pal[CV.WILLOW] = [102, 142, 86]; pal[CV.COVERCROP] = [138, 176, 96]; pal[CV.DAM] = [140, 120, 100]; pal[CV.CROP] = [210, 186, 120]; pal[CV.POND] = [96, 150, 178];
+    // the same colours as the ranch map seen from high up (summer)
+    const pal = {}; pal[CV.BARE] = [150, 138, 118]; pal[CV.PASTURE] = [152, 148, 94]; pal[CV.PRAIRIE] = [158, 152, 100]; pal[CV.TREE] = [58, 80, 44]; pal[CV.ROOF] = [150, 92, 72]; pal[CV.ROAD] = [204, 192, 166];
+    pal[CV.WILLOW] = [96, 124, 58]; pal[CV.COVERCROP] = [104, 128, 66]; pal[CV.DAM] = [110, 86, 60]; pal[CV.CROP] = [112, 128, 64]; pal[CV.POND] = [70, 112, 108];
     const cv = document.createElement('canvas'); cv.width = nx; cv.height = ny;
     const g = cv.getContext('2d'), img = g.createImageData(nx, ny), d = img.data;
     const lx = -0.55, ly = -0.65, lz = 0.52, ll = Math.hypot(lx, ly, lz), L = [lx / ll, ly / ll, lz / ll], ex = 4;

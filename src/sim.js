@@ -15,6 +15,7 @@
      C  record:   water soaked in (m) | - | deepest water seen (m) | fastest water seen (m/s)
      B  bank map (R32F): lowest ground within ~12 m (so a cell knows how tall its bank is)
      I  the land as it was at the start (never changes) — for "soil lost / gained" views
+     U  undo snapshots of T (several; sim.tex.U is the newest)
    Also here for other code to use: sim.restore(T, M) puts saved land back, sim.sampleLine(...) reads a straight
    line across the land (for cross-sections), sim.probe / read* read single spots or whole grids.  */
 (function () {
@@ -310,7 +311,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     this.i = { T: 0, W: 0, F: 0, M: 0, C: 0 };
     this.initialT = world.T; this.initialM = world.M;
     this.rain = 0; this.sources = [];
-    this.undoOK = false;
+    this._undoInit();
     this.bankRadius = Math.max(1, Math.round(S.bankRadius / this.dx));
     for (const k of ['W', 'F', 'C']) this.tex[k].forEach(t => this._clear(t));
     this.refreshBank();
@@ -385,6 +386,8 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     for (const k in this._fbos) gl.deleteFramebuffer(this._fbos[k]);
     this._fbos = {};
     if (this._line) { this._line.forEach(t => gl.deleteTexture(t)); this._line = null; }
+    [].concat(this.undoList, this.undoPool, this.undoHeld || []).forEach(t => gl.deleteTexture(t));
+    this.undoList = []; this.undoPool = []; this.undoHeld = null;
   };
 
   P._cur = function (k) { return this.tex[k][this.i[k]]; };
@@ -472,18 +475,45 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
   P.clearRecord = function () { this.tex.C.forEach(t => this._clear(t)); };
 
   P._copy = function (src, dst) { this._pass('copy', { u_src: src }, [dst]); };
-  P.saveUndo = function () { this._copy(this._cur('T'), this.tex.U); this.undoOK = true; };
-  P.undo = function () {
-    if (!this.undoOK) return false;
-    this._copy(this.tex.U, this._nxt('T')); this._flip('T'); this.refreshBank(); this.undoOK = false; return true;
+
+  // ---- undo: a stack of land snapshots, newest last. As many as fit in about 100 MB of graphics memory (3 at the 1 m level, 12 otherwise).
+  // Older code reads sim.tex.U (the newest snapshot) and sim.undoOK; setting undoOK = false puts the stack aside (sim.restore does that),
+  // setting it back to true right away brings the same stack back (the river module does that after restoring the land itself).
+  P._undoInit = function () {
+    this.undoMax = Math.max(1, Math.min(12, Math.floor(100e6 / (this.nx * this.ny * 16))));
+    this.undoList = []; this.undoPool = [this.tex.U]; this.undoHeld = null;
   };
+  P._dropHeld = function () { if (this.undoHeld) { this.undoHeld.forEach(t => this.undoPool.push(t)); this.undoHeld = null; } };
+  P.saveUndo = function () {
+    this._dropHeld();
+    const t = this.undoList.length >= this.undoMax ? this.undoList.shift() : (this.undoPool.pop() || this._tex(null));
+    this._copy(this._cur('T'), t); this.undoList.push(t); this.tex.U = t;
+  };
+  P.undo = function () {
+    this._dropHeld();
+    const t = this.undoList.pop(); if (!t) return false;
+    this._copy(t, this._nxt('T')); this._flip('T'); this.refreshBank();
+    this.undoPool.push(t); if (this.undoList.length) this.tex.U = this.undoList[this.undoList.length - 1];
+    return true;
+  };
+  /** Forget every snapshot. */
+  P.clearUndo = function () { this._dropHeld(); while (this.undoList.length) this.undoPool.push(this.undoList.pop()); };
+  /** How many steps can be undone. */
+  P.undoDepth = function () { return this.undoList.length; };
+  Object.defineProperty(P, 'undoOK', {
+    get: function () { return this.undoList.length > 0; },
+    set: function (v) {
+      if (v) { if (!this.undoList.length && this.undoHeld) { this.undoList = this.undoHeld; this.undoHeld = null; this.tex.U = this.undoList[this.undoList.length - 1]; } }
+      else if (this.undoList.length) { this._dropHeld(); this.undoHeld = this.undoList; this.undoList = []; }
+    }
+  });
 
   P.reset = function () {
     const gl = this.gl;
     const up = (t, d) => { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.nx, this.ny, gl.RGBA, gl.FLOAT, d); };
     up(this.tex.T[0], this.initialT); this.i.T = 0; up(this.tex.M[0], this.initialM); this.i.M = 0;
     for (const k of ['W', 'F', 'C']) this.tex[k].forEach(t => this._clear(t));
-    this.i.W = 0; this.i.F = 0; this.i.C = 0; this.undoOK = false; this.refreshBank();
+    this.i.W = 0; this.i.F = 0; this.i.C = 0; this.clearUndo(); this.refreshBank();
   };
 
   /** Put saved land back: T and M are Float32Arrays (or null to leave that one alone) of length nx*ny*4, laid out like

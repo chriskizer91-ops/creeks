@@ -14,43 +14,48 @@
   <div id="labels"></div>
 
   <div id="topbar">
-    <button id="btnMenu" class="chip" aria-label="Menu">☰</button>
+    <button id="btnMenu" class="chip round" aria-label="Menu" title="Menu">☰</button>
     <div id="banner" class="chip hidden"><span id="bannerText"></span><button id="bannerBtn" class="go"></button></div>
     <div class="spacer"></div>
     <div id="topRight"></div>
-    <button id="btnCash" class="chip" title="Ranch books">$0</button>
+    <button id="btnCash" class="chip" title="Ranch books: money, fields and soil">$0</button>
   </div>
   <div id="topbar2">
-    <button id="btnLines" class="chip on" title="Contour lines">〰️ <span id="linesText">Lines</span></button>
-    <button id="btnLens" class="chip" title="Change the view">🗺️ Map</button>
+    <button id="btnLens" class="chip" title="Change what the map shows (V)" aria-haspopup="true">🗺️ Map</button>
+    <button id="btnLines" class="chip on" title="Contour lines on or off (L)">〰️ <span id="linesText">Lines</span></button>
   </div>
+  <div id="viewMenu" class="hidden" role="menu"></div>
 
   <div id="stormbar">
+    <button id="stormHead" class="sbhead" aria-label="Send a storm"><span class="sbfull">Send a storm</span><span class="sbshort">Storm</span></button>
     <button class="storm" data-size="1"><b>1-year</b><small>small</small></button>
     <button class="storm" data-size="10"><b>10-year</b><small>big</small></button>
     <button class="storm" data-size="100"><b>100-year</b><small>huge</small></button>
-    <div id="stormProg" class="hidden"><div id="stormBar"></div><span id="stormLabel">Storm…</span><button id="stormEnd" class="go">Skip ⏩</button></div>
+    <div id="stormProg" class="hidden"><div id="stormBarBox"><div id="stormBar"></div></div><span id="stormLabel">Storm…</span><button id="stormEnd" class="go">Skip ⏩</button></div>
   </div>
 
   <div id="hint" class="hidden">
     <div id="hintText"></div>
-    <div class="row"><button id="hintShow" class="go">Show me</button><button id="hintTool" class="go alt"></button><button id="hintNext" class="plain">Next tip</button><button id="hintHide" class="plain">✕</button></div>
+    <div class="row"><button id="hintShow" class="go">Show me</button><button id="hintTool" class="go alt"></button><button id="hintNext" class="plain">Next tip</button><button id="hintHide" class="plain" title="Tuck the tips away">✕</button></div>
   </div>
-  <div id="report" class="hidden"></div>
+  <button id="hintChip" class="chip hidden" title="Show the tips">💡 Tips</button>
+  <div id="leftcol"><div id="legend" class="hidden"></div><div id="report" class="hidden"></div></div>
   <div id="probe" class="hidden"></div>
   <div id="toast" class="hidden"></div>
   <div id="scalebar"><div id="scaleLine"></div><span id="scaleText"></span></div>
+  <button id="btnFit" class="chip round" title="Show the whole ranch (0)" aria-label="Show the whole ranch">⤢</button>
 
   <div id="toolbar">
     <div id="variants" class="hidden"></div>
     <div id="tools"></div>
     <div id="opts">
+      <div id="toolHelp"></div>
       <div id="sizes"></div>
-      <button id="btnUndo" class="chip">↩ Undo</button>
+      <button id="btnUndo" class="chip" title="Undo the last change (Z)">↩ Undo</button>
     </div>
   </div>
 
-  <div id="splash"><div class="box"><div id="splashText">Starting…</div><div class="bar"><div id="splashBar"></div></div></div></div>
+  <div id="splash"><div class="box"><div class="splashTitle">Creek Care</div><div id="splashText">Starting…</div><div class="bar"><div id="splashBar"></div></div></div></div>
   <div id="modal" class="hidden"><div id="card"></div></div>
 </div>
 <script src="src/config.js"></script>

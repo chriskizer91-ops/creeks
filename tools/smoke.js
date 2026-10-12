@@ -170,7 +170,7 @@ async function apiChecks() {
       let n = 0; do { g.nextLens(); n++; } while (g.lensIdx !== 0 && n < 20);
       return { ids, log: log0, evs: evs0, a, b, cycle: n, btn: btn.textContent };
     });
-    check('lens registry: built-ins first, module lens keeps renderer lens 0, button follows, "lens" event fires', ln.ids.slice(0, 4).join() === 'map,soil,moved,flood' && ln.ids[ln.ids.length - 1] === 'smokelens' && ln.log.join() === 'on,off' && ln.evs.slice(0, 3).join() === 'smokelens,soil,map' && ln.a.lens === 0 && ln.a.idx === ln.ids.length - 1 && ln.a.label === 'Smoke lens' && ln.a.on && ln.b.lens === 1 && ln.b.label.indexOf('Soil') >= 0 && ln.cycle === ln.ids.length && ln.btn.indexOf('Map') >= 0, ln);
+    check('lens registry: built-ins first, module lens keeps renderer lens 0, button follows, "lens" event fires', ln.ids.slice(0, 4).join() === 'map,soil,moved,flood' && ln.ids[ln.ids.length - 1] === 'smokelens' && ln.log.join() === 'on,off' && ln.evs.slice(0, 3).join() === 'smokelens,soil,map' && ln.a.lens === 0 && ln.a.idx === ln.ids.length - 1 && ln.a.label.indexOf('Smoke lens') === 0 && ln.a.on && ln.b.lens === 1 && ln.b.label.indexOf('Soil') >= 0 && ln.cycle === ln.ids.length && ln.btn.indexOf('Map') >= 0, ln);
 
     // ---- UI helpers
     const ui1 = await t.eval(() => {
@@ -200,11 +200,11 @@ async function apiChecks() {
       ui.addSetting({ id: 'smoke.choice', label: 'Smoke choice', type: 'choice', options: ['one', 'two', { value: 3, label: 'three' }], default: 'one' });
       ui.menu(); return true;
     });
-    await t.page.waitForSelector('#card .btns button:has-text("Smoke menu item")');
-    const menuLabels = await t.eval(() => [...document.querySelectorAll('#card .btns button')].map((b) => b.textContent));
-    await t.page.click('#card .btns button:has-text("Smoke menu item")');
+    await t.page.waitForSelector('#card button:has-text("Smoke menu item")');
+    const menuLabels = await t.eval(() => [...document.querySelectorAll('#card button')].map((b) => b.textContent));
+    await t.page.click('#card button:has-text("Smoke menu item")');
     await t.eval(() => { Creek.ui.menu(); });                       // (not returned: it resolves only when the card is closed)
-    await t.page.click('#card .btns button:has-text("Settings")');
+    await t.page.click('#card button:has-text("Settings")');
     await t.page.waitForSelector('#card .srow');
     await t.page.click('#card .srow:has-text("Smoke toggle") .sw');
     await t.page.click('#card .srow:has-text("Smoke choice") .schoice button:has-text("two")');
@@ -212,7 +212,8 @@ async function apiChecks() {
     const sv = await t.eval(() => ({ rows: document.querySelectorAll('#card .srow').length, mi: window.__mi, toggle: Creek.settings.get('smoke.toggle'), choice: Creek.settings.get('smoke.choice'), slider: Creek.settings.get('smoke.slider'), contours: document.querySelector('#card .srow').textContent }));
     await t.shot('07-phone-settings');
     await t.eval(() => Creek.ui.closeCard());
-    const order = menuLabels.indexOf('Settings') < menuLabels.indexOf('Smoke menu item') && menuLabels.indexOf('Smoke menu item') < menuLabels.indexOf('Start the ranch over');
+    const at = (txt) => menuLabels.findIndex((l) => l.indexOf(txt) >= 0);
+    const order = at('Settings') >= 0 && at('Settings') < at('Smoke menu item') && at('Smoke menu item') < at('Start the ranch over');
     check('menu has Settings and module items (in order) and the module item runs', order && sv.mi === 1, { menuLabels, mi: sv.mi });
     check('Settings card lists built-in and module settings and stores changes', sv.rows >= 4 && sv.toggle === true && sv.choice === 'two' && sv.slider === 7 && /Contour/.test(sv.contours), sv);
 
@@ -446,10 +447,10 @@ async function exampleChecks() {
     await t.press('e'); const sh1 = await ex(() => Creek.example.panel.visible); await t.press('e'); const sh2 = await ex(() => Creek.example.panel.visible);
     check('example: season and reset events, and the E shortcut shows/hides the panel', (await ex(() => Creek.example.counts.season >= 1 && Creek.example.counts.reset >= 1)) && sh1 === true && sh2 === false);
     await ex(() => { Creek.ui.menu(); });
-    await t.page.waitForSelector('#card .btns button:has-text("Say hello")');
-    await t.page.click('#card .btns button:has-text("Say hello")'); await t.sleep(200);
+    await t.page.waitForSelector('#card button:has-text("Say hello")');
+    await t.page.click('#card button:has-text("Say hello")'); await t.sleep(200);
     check('example: the menu item runs', /Hello from the example module/.test(await ex(() => document.getElementById('toast').textContent)));
-    await ex(() => { Creek.ui.menu(); }); await t.page.click('#card .btns button:has-text("Settings")'); await t.page.waitForSelector('#card .srow:has-text("chatty")');
+    await ex(() => { Creek.ui.menu(); }); await t.page.click('#card button:has-text("Settings")'); await t.page.waitForSelector('#card .srow:has-text("chatty")');
     await t.page.click('#card .srow:has-text("chatty") .sw'); await ex(() => Creek.ui.closeCard());
     check('example: its setting is in the Settings card and changes Creek.settings', (await ex(() => Creek.settings.get('example.chatty') === true && Creek.example.chatty === true)));
     await ex(() => { game.setTool('dig'); game.focusOn(window.__c.x, window.__c.y, 2); }); await t.frames(2);

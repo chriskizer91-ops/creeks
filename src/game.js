@@ -9,28 +9,39 @@
   const SEASONS = ['summer', 'fall', 'winter', 'spring'];
   const FT = 3.281;
 
-  const useTools = Object.keys(USES).filter(k => k !== 'wild').map(k => ({ id: k, icon: USES[k].icon, label: USES[k].short, long: USES[k].label }));
+  const M = C.money, usd = (v) => '$' + (Math.round(v * 100) / 100).toLocaleString();
+  const useTools = Object.keys(USES).filter(k => k !== 'wild').map(k => ({ id: k, icon: USES[k].icon, label: USES[k].short, long: USES[k].label,
+    help: USES[k].label + ': ' + USES[k].hint + ' Tap a field to switch it.', cost: USES[k].cost ? 'about ' + usd(Math.round(USES[k].cost / 2.471)) + ' an acre to switch' : 'free to switch' }));
+  // help = one line shown in the tool tray while the tool is picked; cost = what it costs, in words
   Creek.TOOLS = [
-    { id: 'look',   icon: '👆', label: 'Look',       kind: 'look',  help: 'Touch the map to read the ground and the water. The contour line through that spot lights up.' },
-    { id: 'dig',    icon: '⛏️', label: 'Dig',        kind: 'paint', gl: 0, sizes: [3, 6, 12], help: 'Hold and drag to dig. Lower a bank, dig a ditch, shape a bench.' },
-    { id: 'pile',   icon: '⛰️', label: 'Pile',       kind: 'paint', gl: 1, sizes: [3, 6, 12], help: 'Hold and drag to pile soil. Build berms and dams.' },
-    { id: 'swale',  icon: '〰️', label: 'Swale',      kind: 'paint', gl: 7, sizes: [2, 3, 4], card: 'swale', help: 'Drag along a contour line. The line you are following lights up. Water stops in a level ditch and soaks in.' },
-    { id: 'pond',   icon: '💧', label: 'Pond',       kind: 'stamp', gl: 5, sizes: [8, 14, 22], card: 'pond', help: 'Tap to dig a pond. Tap low ground, where water already wants to go.' },
-    { id: 'dam',    icon: '🪵', label: 'Check dam',  kind: 'paint', gl: 6, sizes: [2, 3, 5], card: 'bda', help: 'Drag across a gully or creek to build a post-and-branch dam (BDA).' },
+    { id: 'look',   icon: '👆', label: 'Look',       kind: 'look',  help: 'Touch the map to read the ground and the water. The contour line through that spot lights up.', cost: 'free' },
+    { id: 'dig',    icon: '⛏️', label: 'Dig',        kind: 'paint', gl: 0, sizes: [3, 6, 12], help: 'Hold and drag to dig. Lower a bank, cut a ditch, shape a bench.', cost: usd(M.digPerM3) + ' per cubic metre moved' },
+    { id: 'pile',   icon: '⛰️', label: 'Pile',       kind: 'paint', gl: 1, sizes: [3, 6, 12], help: 'Hold and drag to pile soil. Build berms and plugs.', cost: usd(M.digPerM3) + ' per cubic metre moved' },
+    { id: 'swale',  icon: '〰️', label: 'Swale',      kind: 'paint', gl: 7, sizes: [2, 3, 4], card: 'swale', help: 'Drag along a contour line (it lights up). A level ditch stops running water so it soaks in.', cost: usd(M.swalePerM) + ' per metre, plus digging' },
+    { id: 'pond',   icon: '💧', label: 'Pond',       kind: 'stamp', gl: 5, sizes: [8, 14, 22], card: 'pond', help: 'Tap low ground, where water already gathers, to dig a pond.', cost: usd(M.pond) + ' plus digging' },
+    { id: 'dam',    icon: '🪵', label: 'Check dam',  kind: 'paint', gl: 6, sizes: [2, 3, 5], card: 'bda', help: 'Drag across a gully or creek, bank to bank, to build a post-and-branch dam (BDA).', cost: usd(M.dam / 10) + ' per metre' },
     { id: 'plant',  icon: '🌱', label: 'Plant', card: 'roots', help: 'Pick what to plant.', opts: [
-        { id: 'grass', icon: '🌾', label: 'Native grass', kind: 'paint', gl: 2, sizes: [3, 6, 12] },
-        { id: 'tree', icon: '🌳', label: 'Trees', kind: 'stamp', gl: 3, sizes: [5] },
-        { id: 'willow', icon: '🌿', label: 'Willow stakes', kind: 'paint', gl: 4, sizes: [3] }] },
+        { id: 'grass', icon: '🌾', label: 'Native grass', kind: 'paint', gl: 2, sizes: [3, 6, 12], help: 'Drag to sow native grass. Its roots reach six feet, so it holds soil and drinks rain.', cost: usd(M.grassPerM2) + ' per square metre' },
+        { id: 'tree', icon: '🌳', label: 'Trees', kind: 'stamp', gl: 3, sizes: [5], help: 'Tap to plant a grove. Trees are slow, then root deepest of all.', cost: usd(M.treePerStamp) + ' a grove' },
+        { id: 'willow', icon: '🌿', label: 'Willow stakes', kind: 'paint', gl: 4, sizes: [3], help: 'Drag along a creek bank. Willow stakes sprout fast and knit the bank together.', cost: usd(M.willowPerStamp / 5) + ' per metre' }] },
     { id: 'fields', icon: '🚜', label: 'Fields', kind: 'stamp', card: 'fields', help: 'Pick a land use, then tap a field to switch it.', opts: useTools }
   ];
 
   // The views the Look / view button cycles through. `lens` is the number the map renderer understands.
   // Lenses added by modules (game.addLens) keep the renderer on lens 0 and draw through game.extras instead.
+  // desc = one line for the view menu; legend = what the colours mean, shown in a little box while the view is on
+  // ({title, ramp: [css colours, low to high], left, right, note} or {title, items: [[css colour, words], ...]}).
   const BUILTIN_LENSES = [
-    { id: 'map',   label: '🗺️ Map',          lens: 0, toast: 'Back to the map.' },
-    { id: 'soil',  label: '🟤 Soil health',  lens: 1, toast: 'Soil health: dark = rich in organic matter, pale = tired soil. Rich soil soaks up water.' },
-    { id: 'moved', label: '🔴 Soil moved',   lens: 2, toast: 'Soil moved since the start: red = washed away, blue = piled up. This is where the land is changing.' },
-    { id: 'flood', label: '🔵 Flood depth',  lens: 3, toast: 'How deep the water got in the last storm. Dark blue is deepest.' }
+    { id: 'map',   label: '🗺️ Map',          lens: 0, toast: 'Back to the map.', desc: 'The ranch as it looks from the air.' },
+    { id: 'soil',  label: '🟤 Soil health',  lens: 1, toast: 'Soil health: dark = rich in organic matter, pale = tired soil. Rich soil soaks up water.',
+      desc: 'How much organic matter the soil holds. Rich soil soaks up rain.',
+      legend: { title: 'Soil organic matter', ramp: ['#d6b87a', '#a5774a', '#5c3a22', '#382316'], left: 'tired', right: 'rich', note: 'Grey: roofs and roads.' } },
+    { id: 'moved', label: '🔴 Soil moved',   lens: 2, toast: 'Soil moved since the start: red = washed away, blue = piled up. This is where the land is changing.',
+      desc: 'Where soil washed away (red) or was dropped (blue) since day one.',
+      legend: { title: 'Soil moved since day one', ramp: ['#bf1f14', '#f29a4c', '#dcd6ca', '#73b2e6', '#144ea8'], left: 'washed away', right: 'built up', note: 'Full colour is a metre or more.' } },
+    { id: 'flood', label: '🔵 Flood depth',  lens: 3, toast: 'How deep the water got in the last storm. Dark blue is deepest.',
+      desc: 'How deep the water got in the last storm.',
+      legend: { title: 'Deepest water, last storm', ramp: ['#9ed1eb', '#4d8fbf', '#0f2e73'], left: '4 in', right: '10 ft', note: 'No colour: it stayed dry.' } }
   ];
 
   function Game(canvas) {
@@ -102,6 +113,7 @@
   };
 
   G.loadLevel = async function (L) {
+    this.dropStorm();                                   // the storm belongs to the land that is about to go
     this.ready = false;
     if (this.sim) { this.sim.dispose(); this.sim = null; }
     this.level = L;
@@ -110,7 +122,7 @@
     this.world = await Creek.generateWorldAsync(dx, (f) => this.cbs.progress && this.cbs.progress('Surveying the ranch…', 0.05 + 0.85 * f));
     this.cbs.progress && this.cbs.progress('Loading the land onto the graphics chip…', 0.95);
     await new Promise(r => setTimeout(r, 20));
-    this.sim = new Creek.Sim(this.gl, this.world);
+    this.sim = new Creek.Sim(this.gl, this.world); this.undoStates = []; this.undoState = null;
     this.sim.onRestore = () => this.terrainChanged();     // sim.restore(...) announces itself as a terrain change
     this.fields = this.world.meta.fields.map(f => Object.assign({}, f));
     this.cash = C.money.start; this.ledger = []; this.groundwater = 9000; this.year = 1; this.season = 'summer'; this.baseMoist = C.seasons.summer.moist;
@@ -132,10 +144,16 @@
     const dpr = Math.min(window.devicePixelRatio || 1, 2), r = this.canvas.getBoundingClientRect();
     this.canvas.width = Math.round(r.width * dpr); this.canvas.height = Math.round(r.height * dpr);
     this.dpr = dpr; this.cw = r.width; this.ch = r.height;
-    this.fitScale = Math.min(this.cw / C.mapW, this.ch / C.mapH) * 0.96;
+    const ins = this.insets || { top: 0, bottom: 0, left: 0, right: 0 };       // the screen furniture (ui.js keeps this up to date)
+    this.fitScale = Math.min((this.cw - ins.left - ins.right) / C.mapW, (this.ch - ins.top - ins.bottom) / C.mapH) * 0.97;
+    if (!(this.fitScale > 0.01)) this.fitScale = Math.min(this.cw / C.mapW, this.ch / C.mapH) * 0.96;
     const vp = this.provider(); if (vp && vp.resize) this._guard('view provider resize', () => vp.resize());
   };
-  G.fitCamera = function () { this.cam = { x: C.mapW / 2, y: C.mapH / 2, scale: this.fitScale }; };
+  /** The whole ranch in the part of the screen the furniture leaves free (game.insets, in CSS px). */
+  G.fitCamera = function () {
+    const ins = this.insets || { top: 0, bottom: 0, left: 0, right: 0 }, s = this.fitScale;
+    this.cam = { x: C.mapW / 2 - (ins.left - ins.right) / 2 / s, y: C.mapH / 2 - (ins.top - ins.bottom) / 2 / s, scale: s };
+  };
 
   // ---- the view provider: a module (the 3D view) can take over drawing, picking and projecting while p.active is true
   /** The provider to use right now (set, active, and not thrown out for crashing), or null for the flat map. */
@@ -330,13 +348,21 @@
     else if (d.kind === 'paint') this.terrainChanged();
     this.emit('strokeEnd', this.strokeInfo(s, true));
   };
-  /** Take the one-step undo snapshot. A custom tool that edits the land must call this first. */
+  /** Take an undo snapshot (the land, the fields' uses and the money). A custom tool that edits the land must call this first.
+      Several steps are kept (sim.undoMax); game.undoState is the newest. */
   G.snapshotForUndo = function () {
-    this.sim.saveUndo(); this.undoState = { fields: this.fields.map(f => f.use), cash: this.cash, ledger: this.ledger.length }; return true;
+    this.sim.saveUndo();
+    const st = this.undoStates || (this.undoStates = []);
+    st.push({ fields: this.fields.map(f => f.use), cash: this.cash, ledger: this.ledger.length });
+    while (st.length > this.sim.undoMax) st.shift();
+    this.undoState = st[st.length - 1];
+    this.emit('undo', this.sim.undoDepth());
+    return true;
   };
   G.undo = function () {
     if (this.sim.undo()) {
-      const u = this.undoState;
+      const st = this.undoStates || [], u = st.length ? st.pop() : this.undoState;
+      this.undoState = st.length ? st[st.length - 1] : null;
       if (u) {
         const changed = []; this.fields.forEach((f, i) => { if (f.use !== u.fields[i]) changed.push(f); f.use = u.fields[i]; });
         this.cash = u.cash; this.ledger.length = u.ledger; this.cashChanged(); this.cbs.fieldsChanged && this.cbs.fieldsChanged();
@@ -344,6 +370,7 @@
       }
       this.cbs.changed && this.cbs.changed();
       this.terrainChanged();
+      this.emit('undo', this.sim.undoDepth());
       return true;
     }
     return false;
@@ -453,12 +480,12 @@
   };
 
   // ---------------------------------------------------------------- views (lenses)
-  /** Add a view to the view button's cycle: {id, label, toast, activate(game), deactivate(game)}. Module lenses keep the
+  /** Add a view to the view menu: {id, label, toast, desc, legend, activate(game), deactivate(game)}. Module lenses keep the
       map renderer on lens 0 and draw their own thing through game.extras. Returns the lens (or the existing one with that id). */
   G.addLens = function (def) {
     if (!def || typeof def.id !== 'string' || !def.id) { console.error('[creek] addLens needs {id, label}'); return null; }
     const old = this.lenses.find(l => l.id === def.id); if (old) { console.warn('[creek] lens "' + def.id + '" already exists'); return old; }
-    const l = { id: def.id, label: def.label || def.id, toast: def.toast || '', lens: 0, activate: def.activate, deactivate: def.deactivate };
+    const l = { id: def.id, label: def.label || def.id, toast: def.toast || '', desc: def.desc || '', legend: def.legend || null, lens: 0, activate: def.activate, deactivate: def.deactivate };
     this.lenses.push(l); return l;
   };
   /** Switch to a lens by id or by position in game.lenses. Emits "lens" (id). */
@@ -519,6 +546,16 @@
     return true;
   };
   G.stopStorm = function () { if (this.storm) this.finishStorm(); };
+  /** End a running storm without a report, because its land is going away (a reset, a new detail level). Returns true if there was one. */
+  G.dropStorm = function () {
+    if (!this.storm) return false;
+    this.storm = null; this.turbo = false; this.paused = false; this.fast = false;
+    if (this.sim) { this.sim.setRain(0); this.sim.setSources([]); }
+    this.weather.rain = 0; this.weather.flash = 0;
+    this.cbs.stormDropped && this.cbs.stormDropped();
+    this.emit('stormDropped');
+    return true;
+  };
 
   G.stepStorm = function () {
     const st = this.storm, sim = this.sim, B = C.stormBurst, end = B + C.stormTail, meta = this.world.meta;
@@ -667,7 +704,8 @@
   };
 
   G.resetMap = function () {
-    this.sim.reset(); this.fields = this.world.meta.fields.map(f => Object.assign({}, f));
+    this.dropStorm();
+    this.sim.reset(); this.fields = this.world.meta.fields.map(f => Object.assign({}, f)); this.undoStates = []; this.undoState = null;
     this.cash = C.money.start; this.ledger = []; this.groundwater = 9000; this.year = 1; this.season = 'summer'; this.baseMoist = C.seasons.summer.moist;
     this.sim.dryOut(this.baseMoist, 0); this.lastStorm = null; this.analysis = null; this.baseline = null; this.stormHistory = [];
     this.weather.rain = 0; this.weather.flash = 0;
@@ -767,6 +805,13 @@
 
   /** For the swale tool: light up the contour under the cursor before you start. */
   G.updateHover = function () {
+    if (this.tool === 'fields' && !this.stroke && this.hover) {          // the field under the pointer lights up, so you know which one a tap will switch
+      const now = performance.now(); if (this._hfT && now - this._hfT < 120) return; this._hfT = now;
+      const w = this.toWorld(this.hover.x, this.hover.y), f = this.inMap(w) ? this.fields[this.sim.probe(w.x, w.y).field - 1] : null;
+      this.hiField = f && f.kind === 'field' ? f.id : 0;
+      return;
+    }
+    this.hiField = 0;
     if (this.tool === 'swale' && !this.stroke && this.hover) {
       const now = performance.now(); if (this._hvT && now - this._hvT < 150) return; this._hvT = now;
       const w = this.toWorld(this.hover.x, this.hover.y);
@@ -784,14 +829,14 @@
     let brush = { x: 0, y: 0, r: 0, on: false };
     const bp = this.stroke ? this.stroke.pos : (this.hover && d.kind !== 'look' ? this.hover : null);
     if (bp && d.kind !== 'look' && d.kind !== 'custom') { const w = this.toWorld(bp.x, bp.y); if (w) brush = { x: w.x, y: w.y, r: Math.max(this.brushRadius(), 5 / this.cam.scale), on: true }; }
-    const tints = { summer: [1, 0.86, 0.5, 0.04], fall: [0.95, 0.5, 0.2, 0.06], winter: [0.65, 0.78, 0.95, 0.08], spring: [0.6, 0.9, 0.6, 0.03] };
+    const tints = { summer: [1, 0.86, 0.5, 0.03], fall: [0.95, 0.5, 0.2, 0.04], winter: [0.65, 0.78, 0.95, 0.05], spring: [0.6, 0.9, 0.6, 0.02] };
     const hints = this.activeHint ? [this.activeHint] : [];
     this.contourStep = this.contourInterval();
-    const tint = this.storm ? [0.30, 0.34, 0.42, 0.18] : tints[this.season];
+    const tint = this.storm ? [0.30, 0.34, 0.42, 0.06 + 0.06 * this.weather.rain] : tints[this.season];
     const state = {
       cam: { x: this.cam.x, y: this.cam.y, scale: this.cam.scale * this.dpr }, time: this.time,
       contour: this.contourOn ? this.contourStep : 0, lens: this.lens, hiH: this.hiH, brush: { x: brush.x, y: brush.y, r: brush.r, on: brush.on },
-      hints, tint, extras: this.extras
+      hints, tint, extras: this.extras, hiField: this.hiField || 0
     };
     if (vp) {
       state.width = this.canvas.width; state.height = this.canvas.height; state.views = this.sim.views();

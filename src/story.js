@@ -49,7 +49,7 @@
     await stormEnded;
     skipBtn.onclick = oldSkip;
     const baseline = skipped ? null : g.lastStorm;
-    g.resetMap(); if (!alive()) return;
+    if (!alive()) return; g.resetMap();          // (a story that was left behind must not reset the player's ranch)
     g.analysis = null; g.baseline = baseline;
 
     const years = [];
