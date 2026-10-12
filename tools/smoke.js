@@ -350,6 +350,16 @@ async function apiChecks() {
       return o;
     });
     check('sim.restore puts terrain back, tells listeners (terrain event, terrainVersion) and rejects wrong sizes', rs.up && rs.back && rs.heard === 2 && rs.version === 2 && rs.threw, rs);
+    // ---- the land when the storm began (texture S): a storm start copies the land; tools and undo move it with the land, so only the water's work shows
+    const sm = await t.eval(() => {
+      const sim = game.sim, o = {}; if (!sim.markStorm || !sim.tex.S) return { none: true };
+      const rd = () => { const T = sim.readTerrain(), S = sim._read(sim.tex.S, 0, 0, sim.nx, sim.ny); let worst = 0; for (let i = 0; i < T.length; i += 4) worst = Math.max(worst, Math.abs(T[i] - S[i])); return worst; };
+      o.v = Object.keys(sim.views()).indexOf('S') >= 0; sim.markStorm(); o.same = rd() < 1e-5;
+      game.snapshotForUndo(); sim.applyTool(1, 700, 700, 8, 1.5, 0, 0); o.afterTool = rd() < 1e-4;
+      game.undo(); o.afterUndo = rd() < 1e-4; o.fresh = game.freshness();
+      return o;
+    });
+    check('sim.markStorm keeps the land at the start of a storm; tools and undo move it with the land (views().S)', sm.none || (sm.v && sm.same && sm.afterTool && sm.afterUndo && sm.fresh >= 0 && sm.fresh <= 1), sm);
     check('no console errors in the API checks', t.errors.length === 0, clean(t));
   } finally { await t.close(); }
 }
@@ -416,7 +426,7 @@ async function exampleChecks() {
 
     // lens
     const l = await ex(() => { game.setLens('example'); const a = Creek.example.counts.lensOn; game.setLens('map'); return { on: a, off: Creek.example.counts.lensOff, ids: game.lenses.map((x) => x.id).join(), lens: game.lens }; });
-    check('example: its lens joins the view button and runs activate / deactivate', l.on === 1 && l.off === 1 && /map,soil,moved,flood,example/.test(l.ids) && l.lens === 0, l);
+    check('example: its lens joins the view button and runs activate / deactivate', l.on === 1 && l.off === 1 && /map,soil,moved,flood,storm,example/.test(l.ids) && l.lens === 0, l);
 
     // custom tool: a drag measures a profile with sim.sampleLine, a tap counts (saved state)
     await ex(() => { const s = game.world.meta.streams[0], p = s.pts[Math.floor(s.pts.length * 0.45)]; game.setTool('exprofile'); game.focusOn(p[0], p[1], 2); Creek.ui.closeCard(); window.__c = { x: p[0], y: p[1] }; });

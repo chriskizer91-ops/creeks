@@ -463,7 +463,8 @@
     L.every = (C.stormBurst + C.stormTail) / 450; L.nextRec = L.every; liveY = 0; cursorT = null;
     keepBaseline();
     // opening by itself never pushes away a panel the player is using (on a phone there is room for one)
-    if (set.get('stormgraph.auto', true) && !panel.visible && !inTheWay().length) { panel.show(); autoOpened = true; }
+    const sp = spot();                                              // (a phone on its side may have no room for it under the storm box)
+    if (set.get('stormgraph.auto', true) && !panel.visible && !inTheWay().length && sp.floor - sp.top >= 100) { panel.show(); autoOpened = true; }
     renderAll();
   }
   function onStep(s) {
@@ -545,9 +546,11 @@
     const app = document.getElementById('app'), vw = app.clientWidth, vh = app.clientHeight;
     let w = vw < 600 ? vw - 20 : Math.min(410, vw - 20);
     if (vw >= 600) { const tr = tipRight(vw); if (tr) w = Math.max(Math.min(w, vw - 20 - tr), Math.min(340, w)); }    // clear of the tip card when that costs little
-    const x0 = vw - 10 - w, x1 = vw - 10;
-    let top = 60, floor = vh - 10;
+    let x0 = vw - 10 - w, x1 = vw - 10, top = 60, floor = vh - 10;
     rectsIn(TOP_THINGS, x0, x1).forEach((r) => { top = Math.max(top, Math.round(r.bottom) + 8); });
+    // on narrower screens the 3D view's controls are a slim strip just under the storm box: the graph stands beside it, not over it
+    const v3 = document.querySelector('.panel[data-panel="view3d"]:not(.hidden)'), r3 = v3 && v3.getBoundingClientRect();
+    if (r3 && r3.width > 0 && r3.width < 120 && r3.left < x1 && r3.top < top + 60) { x1 = Math.round(r3.left) - 8; x0 = Math.max(10, x1 - w); }
     rectsIn(LOW_THINGS, x0, x1).forEach((r) => { if (r.top > top) floor = Math.min(floor, Math.round(r.top) - 8); });
     return { x0, x1, top, floor };
   }
@@ -555,7 +558,9 @@
     if (!panel || !panel.visible) return;
     const s = spot(), st = panel.el.style;
     st.left = s.x0 + 'px'; st.right = 'auto'; st.width = (s.x1 - s.x0) + 'px'; st.top = s.top + 'px'; st.bottom = 'auto';
-    st.maxHeight = Math.max(140, s.floor - s.top) + 'px';
+    if (autoOpened && s.floor - s.top < 48) { panel.hide(); return; }   // it opened by itself and the room has gone: the Graph chip brings it back
+    const cramped = s.floor - s.top < 120;                          // a short screen (a phone on its side): just the title bar and its one-line summary
+    panel.el.classList.toggle('sg-cramped', cramped); st.maxHeight = (cramped ? Math.max(48, s.floor - s.top) : Math.max(140, s.floor - s.top)) + 'px';
   }
   const overlap = (a, b) => a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2;
   /** The other lab panels that the graph would cover if it reached all the way down its column. When there is room left of the
@@ -687,9 +692,9 @@
     '.panel[data-panel="stormgraph"] .pbody{min-height:0;overflow:auto;overscroll-behavior:contain;padding:2px 10px 10px;-webkit-overflow-scrolling:touch}',
     '.panel[data-panel="stormgraph"].sg-min{max-height:none}',
     '.sg-stat{display:none;flex:1;min-width:0;font:12px system-ui,sans-serif;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}',
-    '.sg-min .sg-stat{display:block}',
-    '.sg-min .pbody{display:none}',
-    '.sg-min .sg-unit{display:none}',
+    '.sg-min .sg-stat,.sg-cramped .sg-stat{display:block}',
+    '.sg-min .pbody,.sg-cramped .pbody{display:none}',
+    '.sg-min .sg-unit,.sg-cramped .sg-unit{display:none}',
     '.panel[data-panel="stormgraph"] .phead b{white-space:nowrap}',
     '.sg-hb{flex:0 0 auto;background:transparent;color:var(--ink2);width:40px;height:40px;margin:-6px 0;font-size:16px}',
     '.sg-unit{flex:0 0 auto;margin:-6px 0 -6px auto;height:40px;min-width:48px;background:transparent;display:flex;align-items:center;gap:0;padding:0 2px}',

@@ -121,7 +121,7 @@
     game.on('lens', () => ui.lensChanged());
     document.addEventListener('pointerdown', (e) => { const m = $('viewMenu'); if (!m.classList.contains('hidden') && !m.contains(e.target) && e.target !== $('btnLens')) m.classList.add('hidden'); }, true);
     $('btnFit').onclick = () => ui.fit();
-    $('hintChip').onclick = () => { ui.hintTucked = false; ui.showHint(); };
+    $('hintChip').onclick = () => { ui.hintTucked = false; ui.showHint(); $('hint').classList.add('ontop'); };      // asked for: it stays on top of any panel
     $('btnMenu').onclick = () => ui.menu();
     $('btnCash').onclick = () => ui.books();
     document.querySelectorAll('.storm').forEach((b) => {
@@ -133,7 +133,7 @@
       b.onclick = () => ui.onStorm && ui.onStorm(+b.dataset.size);
     });
     $('stormEnd').onclick = () => game.stopStorm();
-    $('hintHide').onclick = () => { ui.hintTucked = true; $('hint').classList.add('hidden'); game.activeHint = null; ui.showHintChip(); };
+    $('hintHide').onclick = () => { ui.hintTucked = true; $('hint').classList.add('hidden'); $('hint').classList.remove('ontop'); game.activeHint = null; ui.showHintChip(); };
     $('hintNext').onclick = () => { ui.hintIdx++; ui.showHint(); };
     $('hintShow').onclick = () => { const h = ui.hintList[ui.hintIdx % ui.hintList.length]; if (h) { game.focusOn(h.x, h.y, Math.max(1.2, 400 / h.r / 4)); game.activeHint = h; } };
     $('hintTool').onclick = () => { const h = ui.hintList[ui.hintIdx % ui.hintList.length]; if (h) ui.pickTool(h.tool); };
@@ -155,7 +155,7 @@
     setInterval(ui.tick, 250);
     ui.measureInsets(); window.addEventListener('resize', () => { ui.measureInsets(); game.resize(); });
     $('stormHead').onclick = () => $('stormbar').classList.toggle('open');
-    if (window.innerWidth < 600) ui.hintTucked = true;            // on a phone the tips start tucked into a chip, so the map stays clear
+    if (window.innerWidth < 600 || window.innerHeight < 460) ui.hintTucked = true;     // on a phone the tips start tucked into a chip, so the map stays clear
     ui.updateTools();
     ui.lensChanged(true);
     ui.addBuiltinSettings();
@@ -202,6 +202,7 @@
     g.insets = { top: wide ? 12 : Math.max(0, row.bottom - a.top), bottom: Math.max(0, a.bottom - tb.top) + 6, left: 0, right: 0 };
     const tray = Math.round(Math.max(0, a.bottom - tb.top)) + 'px';             // the tips, toasts and low panels sit just above the tray, whatever it holds
     if (tray !== ui._tray && tb.height > 0) { ui._tray = tray; document.documentElement.style.setProperty('--tray', tray); }
+    $('hintChip').classList.toggle('above', wide && tb.left - a.left < 150);   // a wide screen puts the Tips chip beside the tray, if the tray leaves room
   };
   /** Back to the whole ranch (the 3D view frames it its own way). */
   ui.fit = function () { const g = ui.game; if (!g.ready) return; if (g.provider()) g.focusOn(C.mapW / 2, C.mapH / 2, g.fitScale); else g.fitCamera(); };
@@ -352,13 +353,23 @@
   // ---------------------------------------------------------------- hints
   ui.hintList = []; ui.hintIdx = 0;
   ui.refreshHints = function () { ui.hintList = ui.game.computeHints(); ui.hintIdx = 0; ui.showHint(); };
+  /** Panels you open win over the tips: a tip card that a panel covers tucks itself into its chip (the chip brings it back, on top),
+      and the chip itself steps out of sight while a panel sits over it. Checked a few times a second (panels move as the screen changes). */
+  ui.hintClear = function () {
+    const panels = Array.prototype.filter.call(document.querySelectorAll('.panel, #report, #legend'), (p) => !p.classList.contains('hidden'));
+    const under = (el) => { const a = el.getBoundingClientRect(); return a.width > 0 && panels.some((p) => { const b = p.getBoundingClientRect(); return b.width > 0 && a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2; }); };
+    const h = $('hint'), c = $('hintChip');
+    if (!h.classList.contains('hidden') && !h.classList.contains('ontop') && under(h)) { ui.hintTucked = true; h.classList.add('hidden'); ui.game.activeHint = null; ui.showHintChip(); }
+    c.classList.toggle('covered', !c.classList.contains('hidden') && under(c));
+  };
+  setInterval(() => { if (ui.game) ui.hintClear(); }, 400);
   ui.showHintChip = function () {
     const n = ui.hintList.length, c = $('hintChip');
     c.textContent = '💡 Tips' + (n ? ' (' + n + ')' : ''); c.classList.toggle('hidden', !n || !$('hint').classList.contains('hidden'));
   };
   ui.showHint = function () {
-    const g = ui.game, l = ui.hintList; if (!l.length) { $('hint').classList.add('hidden'); g.activeHint = null; ui.showHintChip(); return; }
-    if (ui.hintTucked) { $('hint').classList.add('hidden'); g.activeHint = null; ui.showHintChip(); return; }
+    const g = ui.game, l = ui.hintList; if (!l.length) { $('hint').classList.add('hidden'); $('hint').classList.remove('ontop'); g.activeHint = null; ui.showHintChip(); return; }
+    if (ui.hintTucked) { $('hint').classList.add('hidden'); $('hint').classList.remove('ontop'); g.activeHint = null; ui.showHintChip(); return; }
     const h = l[ui.hintIdx % l.length];
     g.hintsShown[h.id] = (g.hintsShown[h.id] || 0) + 0.5;
     $('hintText').textContent = '💡 ' + h.text; g.activeHint = null;

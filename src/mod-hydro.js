@@ -546,7 +546,7 @@
       storm buttons and the storm box, the storm report card). Measured, so it follows the HUD. */
   function topClear(x0, x1, min) {
     let y = min;
-    document.querySelectorAll('#topbar > *, #topbar2, #scalebar, #stormbar, #report').forEach((e) => {
+    document.querySelectorAll('#topbar > *, #topbar2, #scalebar, #btnFit, #stormbar, #report').forEach((e) => {
       const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0 && r.left < x1 && r.right > x0) y = Math.max(y, Math.round(r.bottom) + 8);
     });
     return y;
@@ -576,7 +576,7 @@
     let secH = 0;
     if (sv) {
       const el = secPanel.el, topLimit = topClear(secLeft, secLeft + secW, low);
-      el.style.left = secLeft + 'px'; el.style.right = 'auto'; el.style.width = secW + 'px'; el.style.bottom = base + 'px'; el.style.maxHeight = Math.max(160, vh - base - topLimit) + 'px';
+      el.style.left = secLeft + 'px'; el.style.right = 'auto'; el.style.width = secW + 'px'; el.style.bottom = base + 'px'; el.style.maxHeight = Math.max(100, vh - base - topLimit) + 'px';
       let ch = wide ? 180 : vw < 420 ? 128 : 160; secEls.cv.style.height = ch + 'px';
       while (narrow && !el.classList.contains('hy-collapsed') && el.scrollHeight > el.clientHeight + 2 && ch > 84) { ch -= 16; secEls.cv.style.height = ch + 'px'; }   // a phone: squeeze the picture rather than scroll
       secH = el.offsetHeight;

@@ -9,7 +9,7 @@
   --tray: calc(148px + var(--safe-b));             /* from the bottom of the screen to the top of the tool tray (ui.js measures it) */
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; background: #e9dfc6; overflow: hidden; overscroll-behavior: none; color: var(--ink);
+html, body { margin: 0; height: 100%; background: #e9dfc6; overflow: hidden; overscroll-behavior: none; touch-action: pan-x pan-y; color: var(--ink);
   font-family: var(--ui); -webkit-user-select: none; user-select: none; -webkit-font-smoothing: antialiased; }
 #app { position: fixed; inset: 0; }
 #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -69,8 +69,9 @@ button:disabled { cursor: default; }
 #scalebar.off { visibility: hidden; }
 
 /* ---- the left column: the colour key of the view, and the storm report */
-#leftcol { position: absolute; left: 10px; top: calc(144px + var(--safe-t)); width: min(250px, calc(100vw - 150px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; z-index: 4; }
-#leftcol > * { pointer-events: auto; }
+#leftcol { position: absolute; left: 10px; top: calc(144px + var(--safe-t)); width: min(250px, calc(100vw - 150px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; z-index: 4;
+  max-height: calc(100% - 152px - var(--safe-t) - var(--tray)); }
+#leftcol > * { pointer-events: auto; min-height: 0; overflow: auto; flex: 0 1 auto; }
 #legend { background: var(--glass); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-radius: 14px; box-shadow: var(--shadow); padding: 9px 11px 8px; font-size: 12px; line-height: 1.35; }
 #legend b { display: block; font-size: 12.5px; margin-bottom: 5px; }
 #legend .lgramp { height: 10px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
@@ -116,7 +117,9 @@ button:disabled { cursor: default; }
 #hint .row .go { padding: 6px 12px; font-size: 13px; }
 #hint .row .plain { font-size: 13px; padding: 6px 9px; }
 #hintHide { margin-left: auto; }
+#hint.ontop { z-index: 9; }
 #hintChip { position: absolute; left: 10px; bottom: calc(var(--tray) + 8px); z-index: 6; font-size: 13px; padding: 7px 12px; }
+#hintChip.covered { visibility: hidden; }
 #probe { position: absolute; z-index: 9; background: rgba(43,31,20,.93); color: #fff6e6; border-radius: 12px; padding: 8px 11px; font-size: 12.5px; line-height: 1.45; pointer-events: none; max-width: 270px;
   box-shadow: 0 4px 14px rgba(0,0,0,.25); }
 #probe b { font-size: 13px; }
@@ -153,6 +156,7 @@ button:disabled { cursor: default; }
   :root { --tray: 140px; }
   #toolbar { left: 50%; right: auto; transform: translateX(-50%); width: max-content; min-width: min(56vw, 820px); max-width: min(820px, calc(100vw - 16px)); border-radius: 18px; bottom: 8px; }
   #hintChip { bottom: 14px; left: 14px; }
+  #hintChip.above { bottom: calc(var(--tray) + 8px); left: 10px; }
 }
 
 /* ---- map labels */
@@ -245,7 +249,7 @@ button:disabled { cursor: default; }
   #topbar .chip { padding: 8px 10px; }
   #topbar .chip.round { padding: 0; width: 38px; height: 38px; }
   #banner { font-size: 13px; padding-left: 10px; gap: 8px; }
-  #banner .go { padding: 6px 10px; font-size: 12px; }
+  #banner .go { padding: 6px 10px; font-size: 12px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #stormbar { width: 112px; padding: 5px; gap: 4px; }
   .storm { padding: 5px 7px 5px 28px; }
   .storm::before { left: 7px; font-size: 14px; }
@@ -257,8 +261,8 @@ button:disabled { cursor: default; }
   .menugrid { grid-template-columns: 1fr; }
   #topbar2 .wide { display: none; }
 }
-/* small screens: the storm box folds into one button until you open it */
-@media (max-width: 600px) {
+/* small screens, and phones on their side: the storm box folds into one button until you open it */
+@media (max-width: 600px), (max-height: 460px) {
   #stormbar .sbhead { pointer-events: auto; font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 600; padding: 6px 4px; border-radius: 10px; }
   #stormbar .sbhead::before { content: "🌧️ "; }
   #stormbar .sbhead::after { content: " ▾"; color: var(--ink2); }

@@ -3,7 +3,7 @@
    lives in shade.js, which the 3D view (mod-view3d.js) uses too, so the two always look the same.
    This file only adds the camera of the flat map: pixels to metres, the paper around the ranch, rain on the glass.
 
-   Views (lens): 0 map · 1 soil health · 2 soil lost / gained since the start · 3 how deep the last flood got
+   Views (lens): 0 map · 1 soil health · 2 soil lost / gained since the start · 3 how deep the last flood got · 4 what the last storm cut away / dropped
    Extras (state.extras, from other modules): flow lines, the trace, the section line, and the storm weather. */
 (function () {
   const C = Creek.CONFIG, GL = Creek.GLSL;
@@ -11,7 +11,9 @@
   const VERT = GL.head({}) + `
 void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position = vec4(p*2.-1., 0., 1.); }`;
 
-  const FRAG = GL.head({ water: 1 }) + GL.core + GL.shade + `
+  // Two builds of the same shader: with the water, and without it for the (many) frames when no water lies on the land (state.wet === false),
+  // which keeps those frames as cheap as they were before the water learned to flow (a software renderer pays for code it skips).
+  const FRAG = (water) => GL.head({ water }) + GL.core + GL.shade + `
 uniform vec2 u_res, u_cam; uniform float u_scale;
 out vec4 o;
 
@@ -38,11 +40,14 @@ void main(){
 
   function Renderer(gl) {
     this.gl = gl;
-    this.prog = new Creek.Shade.Program(gl, VERT, FRAG, 'map');
+    this.prog = new Creek.Shade.Program(gl, VERT, FRAG(1), 'map');
+    this.progDry = null;
   }
   /** Draw the map. v = sim.views(), s = the state game.draw builds, w/h = canvas size in device pixels. */
   Renderer.prototype.draw = function (v, s, w, h) {
-    const gl = this.gl, P = this.prog;
+    const gl = this.gl;
+    if (s.wet === false && !this.progDry) { try { this.progDry = new Creek.Shade.Program(gl, VERT, FRAG(0), 'map (dry)'); } catch (e) { console.warn('[creek] ' + e.message); this.progDry = this.prog; } }
+    const P = s.wet === false ? this.progDry : this.prog;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     Creek.Shade.bind(gl, P, s, v);

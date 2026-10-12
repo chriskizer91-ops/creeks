@@ -95,21 +95,22 @@ void main(){
 in vec3 v_p; out vec4 o;
 void main(){
   vec2 w = v_p.xy;
-  if (bil(u_W,w).r < 0.004) discard;
+  float dep = bil(u_W,w).r;
+  if (dep < 0.004) discard;
   float fp = footprint(w), zk = smoothstep(0.7, 3.2, 1./fp);
   vec4 wl = waterLayer(w, fp, 1., zk);
   if (wl.a < 0.01) discard;
   vec3 d = v_p - u_eye.xyz; float dist = length(d); d /= dist;
-  vec2 q = w*0.8 + vec2(u_time*0.35*(1.-u_wx.z), 0.);                   // little waves that catch the sky and the sun (they smooth out with distance)
-  float n0 = noise(q), nx = noise(q+vec2(0.4,0.)), ny = noise(q+vec2(0.,0.4)), amp = (1.-smoothstep(0.15, 1.2, fp))*0.9;
-  vec3 N = normalize(vec3(-(nx-n0)*amp, -(ny-n0)*amp, 1.));
+  // the surface catches the sky and the sun on the same ripples, rain rings and standing waves the water is drawn with (they smooth out far away)
+  vec3 N = normalize(mix(vec3(0.,0.,1.), g_wN, 1.-smoothstep(0.25, 1.6, fp)));
   vec3 R = reflect(d, N);
-  float fres = pow(1.-max(dot(N,-d), 0.), 4.)*0.55;
+  float fres = pow(1.-max(dot(N,-d), 0.), 4.)*0.55*(1.-g_wFoam);
   vec3 col = mix(wl.rgb, skyColor(vec3(R.xy, abs(R.z))), fres);
-  col += vec3(1.0,0.93,0.78)*pow(max(dot(R,SUN), 0.), 90.)*0.9*(1.-u_wx.x);
+  col += vec3(1.0,0.93,0.78)*pow(max(dot(R,SUN), 0.), 90.)*0.9*(1.-u_wx.x)*(1.-g_wFoam);
   col = mix(col, u_tint.rgb, u_tint.a);
-  col = weatherGrade(col, w);
-  o = vec4(haze(col, d, dist), wl.a);
+  g_wet = wl.a; col = weatherGrade(col, w);
+  float a = max(wl.a, fres*0.8)*smoothstep(0.004, 0.012, dep);                 // the very edge melts into the wet bank
+  o = vec4(haze(col, d, dist), a);
 }`;
 
   // the cut-away sides: soil over limestone, using the real soil depth under each edge
@@ -593,13 +594,22 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     game.cam.x = V.tx; game.cam.y = V.ty; game.cam.scale = clamp(scaleFromDist(V.dist), game.fitScale * 0.8, 30);
   }
 
-  /** On a narrow screen the controls are a strip down the right edge, just under the storm box (which grows while a storm runs). */
+  /** On a narrow or short screen the controls are a strip down the right edge, just under the storm box (which grows while a storm runs). */
   let stripTop = '';
   function placeStrip() {
-    const sb = document.getElementById('stormbar'), narrow = window.innerWidth < 1180;
-    let top = '';
-    if (narrow && sb) { const a = document.getElementById('app').getBoundingClientRect(); top = Math.round(sb.getBoundingClientRect().bottom - a.top + 8) + 'px'; }
-    if (top !== stripTop) { stripTop = top; panel.el.style.top = top; }
+    const sb = document.getElementById('stormbar'), narrow = window.innerWidth < 1180 || window.innerHeight < 660;
+    if (narrow !== panel.el.classList.contains('v3-strip')) panel.el.classList.toggle('v3-strip', narrow);
+    let top = '', right = '';
+    if (narrow && sb) {
+      const a = document.getElementById('app').getBoundingClientRect(), r = sb.getBoundingClientRect(), h = panel.el.offsetHeight;
+      top = Math.round(r.bottom - a.top + 8);
+      if (h && top + h > a.height - 8) {                             // a short screen (a phone on its side): beside the storm box, under the view row
+        const row = document.getElementById('topbar2'), rb = row ? row.getBoundingClientRect() : r;
+        top = Math.round(Math.max(rb.bottom, 0) - a.top); right = Math.round(a.right - r.left + 8) + 'px';
+      }
+      top += 'px';
+    }
+    if (top + right !== stripTop) { stripTop = top + right; panel.el.style.top = top; panel.el.style.right = right; }
   }
 
   // ---------------------------------------------------------------- entering and leaving
@@ -609,7 +619,7 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
     V.tx = game.cam.x; V.ty = game.cam.y; clampTarget(); V.dist = clamp(distFromScale(game.cam.scale), DMIN, DMAX);
     V.tz = V.tzGoal = heightAt(V.tx, V.ty); V.tzDirty = true; V.az = V.azT; V.pitch = V.pitchT;
     P.active = true; game.setViewProvider(P);                       // (also clears a "crashed" mark from an earlier try)
-    if (panel) panel.show(); sync();
+    if (panel) { panel.show(); placeStrip(); } sync();
     touch();
     if (!shownHelp) { shownHelp = true; ui.toast('3D view: drag with two fingers (or the right mouse button) to look around. One finger still uses your tool.'); }
     return true;
@@ -661,17 +671,18 @@ void main(){ o = vec4(v_p.xy, hAt(v_p.xy), 1.); }`;
 .v3-slide input { flex:1; min-width:0; height:36px; accent-color:var(--moss); }
 .v3-slide b { min-width:30px; text-align:right; font-variant-numeric:tabular-nums; }
 .v3-home { display:none; }
-/* Narrower screens: the tip card spans the bottom of the map there, so the controls become a slim strip down the right edge,
-   just below the storm box (placeStrip follows it as it grows during a storm). Heights stay in the Settings card. */
-@media (max-width: 1179px) {
-  .panel.corner-br[data-panel="view3d"] { top:calc(248px + var(--safe-t)); bottom:auto; right:10px; width:auto; max-height:none; overflow:visible; }
-  .panel[data-panel="view3d"] .phead, .panel[data-panel="view3d"] .v3-slide { display:none; }
-  .panel[data-panel="view3d"] .pbody { padding:6px; }
-  .panel[data-panel="view3d"] .v3-row { flex-direction:column; }
-  .panel[data-panel="view3d"] .v3-b { flex:0 0 auto; width:40px; }
-  .panel[data-panel="view3d"] .v3-home { display:block; }
-}
-@media (max-width: 639px) { .panel[data-panel="view3d"] .v3-home { display:none; } }
+/* Narrower or shorter screens (placeStrip sets .v3-strip): the tip card spans the bottom of the map there, or the storm box reaches
+   down to the controls, so they become a slim strip down the right edge, just below the storm box (placeStrip follows it as it grows
+   during a storm). Heights stay in the Settings card. */
+.panel.corner-br[data-panel="view3d"].v3-strip { top:calc(248px + var(--safe-t)); bottom:auto; right:10px; width:auto; max-height:none; overflow:visible; }
+.panel.v3-strip[data-panel="view3d"] .phead, .panel.v3-strip[data-panel="view3d"] .v3-slide { display:none; }
+.panel.v3-strip[data-panel="view3d"] .pbody { padding:6px; }
+.panel.v3-strip[data-panel="view3d"] .v3-row { flex-direction:column; }
+.panel.v3-strip[data-panel="view3d"] .v3-b { flex:0 0 auto; width:40px; }
+.panel.v3-strip[data-panel="view3d"] .v3-home { display:block; }
+@media (max-width: 639px) { .panel.v3-strip[data-panel="view3d"] .v3-home { display:none; } }
+/* a phone on its side has no height for a tall strip: two buttons a row */
+@media (max-height: 460px) { .panel.v3-strip[data-panel="view3d"] .v3-row:first-child { flex-direction:row; flex-wrap:wrap; width:86px; } }
 `);
       panel = ui.panel({ id: 'view3d', title: '3D view', corner: 'br', closable: false });
       const guarded = (label, fn) => () => g._guard('3D button ' + label, fn);

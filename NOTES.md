@@ -11,8 +11,8 @@ The first version (a suburban yard) is kept in git: `git checkout yard-v1`.
 
 ## How to play (the short version)
 - **☰** menu: story, free play, save and load, settings, map school, the picture book.
-- **View ▾** (top left) picks what the map shows: the ranch from the air, soil health, where soil moved, how deep the last flood got,
-  where rain runs. Views that need it show a colour key. **Lines** turns the contour lines on and off. **⤢** (or 0) shows the whole ranch.
+- **View ▾** (top left) picks what the map shows: the ranch from the air, soil health, where soil moved since day one, how deep the last flood got,
+  what the last storm cut away and dropped (it changes while a storm runs), where rain runs. Views that need it show a colour key. **Lines** turns the contour lines on and off. **⤢** (or 0) shows the whole ranch.
 - **Send a storm** (top right): 1-, 10- or 100-year rain. Pause or fast-forward it in the storm box (Space, F).
 - **Tools** (bottom): the line under them says what the picked tool does and what it costs. Undo (Z) goes back several steps.
 - **🏞️ Valley** opens the river-scale view; **3D** (D) tilts the ranch; **📈 Graph** (G) shows the storm's hydrograph.
@@ -27,9 +27,20 @@ the finest level that runs a storm in ~100 s. Change it from the ☰ menu (it re
 The flat map and the 3D view share one shader, made to look like an aerial photo of North Texas: land kinds blend at ragged,
 organic edges (a noisy vote of the four nearest cells), trees are drawn crown by crown with their shadows and turn with the seasons
 (live oak and cedar stay green), pasture, prairie and crops have their own textures, dry black clay cracks, cattle trails follow
-the contour on grazed slopes, fresh flood deposits and scoured ground show. Water: clear water is jade and fades with depth, flood
-water is tan, a thin sheet of runoff only darkens the ground, ripples drift with the current and white water appears where the flow
-is supercritical (Froude number above 1).
+the contour on grazed slopes, flood deposits and scoured ground show. Water: clear water is jade and fades with depth, flood
+water is tan-brown (it keeps its colour under the storm light), a thin sheet of runoff only darkens the ground. The current carries
+everything: billows of paler and darker mud, lines of foam whose dashes slide downstream, ripples, sticks and leaves; slack water turns
+in lazy eddies; standing waves and white water appear where the flow is supercritical (Froude number above 1); the leading edge of a
+flood carries a band of brown foam and drift; rain rings the surface; over ground the storm is cutting, the water boils dark.
+Patterns that follow the current are drawn in fixed frames and blended by angle, so they never swirl. The 3D view reflects the sky on
+the same ripples and rain rings, and shallow flood water shows a hint of the bed.
+
+What a storm does to the land shows while it runs and after it: the engine keeps the land as it was when the storm began (texture S,
+`sim.markStorm`), and ground it cut away turns raw, damp subsoil (rusty in the loam, olive-brown in the clay, pale and limy where deep),
+scored by rills down the slope; ground it built up turns pale sand and silt with ripple marks in patches and a drape of silt in the
+hollows; where a real flood stood (a foot or more) the grass is filmed grey and a drift line of sticks and straw marks its highest
+edge. These marks weather back over about a year of seasons (`game.freshness()`). Steep bank faces, seen from the side in 3D, show dark
+topsoil over paler subsoil over the pale limy layer on the rock. The **🟠 Storm cuts** view shows the same thing as a red / blue map.
 
 ## Folder map
 - `src/config.js`  every tunable number: soils, covers, land uses, money, storms, engine strengths, the modules to load
@@ -45,7 +56,7 @@ is supercritical (Froude number above 1).
   (ranch health, postcards, neighbours), `audio` (rain, water and nature sounds), `coach` (tour and map school), `river` (valley view).
   `example` is a reference module that is not loaded by default (`?addmods=example`).
 - `tools/bundle.py` packs everything into one html file if a host needs that
-- `tools/smoke.js`, `tools/testlib.js`  the browser smoke test (headless Chromium, software GL)
+- `tools/smoke.js`, `tools/testlib.js`  the browser smoke test (headless Chromium, software GL); `tools/layout.js` the screen-size check
 - `tools/river-test.js`, `tools/river-calibrate.js`, `tools/river-selftest.js`  run the river model in Node (see `docs/RIVER_SCALE.md`)
 - `assets/pictures/`, `assets/extras/`  the painted pictures
 
@@ -60,5 +71,9 @@ Each slot falls back to a picture from the first set until a ranch painting exis
   reachable. Check them against NOAA Atlas 14 vol. 11 for your spot and edit.
 - Erosion strength (`sim.Kc`, `sim.morph`, `slumpRate`), money numbers and crop yields are first guesses.
 - River scale: after changing the river model's physics or valley, re-run `node tools/river-calibrate.js 600` and commit `src/river-calib.js`; `node tools/river-selftest.js` checks the behaviour.
-- The map shader is about 1.7 times the work of the first version (measured in software GL). On a slow phone, lower **Sharpness** in Settings.
+- The map shader is about 1.7 times the work of the first version (measured in software GL). Frames with water on the land cost about
+  1.2 to 1.4 times that since the water learned to flow (flood front, foam lines, rain rings, drift); frames with no water use a build of
+  the shader without the water (`state.wet`, `game.waterOnMap()`) and cost what they did. On a slow phone, lower **Sharpness** in Settings.
+- `node tools/layout.js` checks the screen furniture at fifteen screen sizes (phones on their side too) and many states (storm, 3D,
+  panels, menus, the valley view); `SHOTS=1` saves pictures of each.
 - Not built yet: skipping years on the ranch map, wildlife.

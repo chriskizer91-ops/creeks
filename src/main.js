@@ -3,6 +3,13 @@
                      ?mods=a,b loads only those modules (?mods= loads none) · ?addmods=c loads those as well  */
 (function () {
   const q = new URLSearchParams(location.search);
+  // A full-screen game: a pinch or a double tap on the buttons must not zoom the page (iPhones ignore user-scalable=no), or part of the
+  // screen furniture ends up past the right edge with no easy way back. Should the page get zoomed anyway, it is put back.
+  ['gesturestart', 'gesturechange'].forEach((k) => document.addEventListener(k, (e) => e.preventDefault(), { passive: false }));
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => {
+    const m = document.querySelector('meta[name=viewport]');
+    if (m && window.visualViewport.scale > 1.01) { const c = m.content; m.content = c + ', minimum-scale=1'; setTimeout(() => { m.content = c; }, 60); }
+  });
   if (q.has('quick') && q.get('quick') !== '0') { Creek.CONFIG.stormBurst = 150; Creek.CONFIG.stormTail = 90; }
 
   /** The module ids to run: CONFIG.modules, unless ?mods= replaces them; ?addmods= adds more. Only plain ids (no paths). */

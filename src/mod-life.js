@@ -371,11 +371,13 @@
   function place() {
     if (!panel || !panel.visible) return;
     const app = document.getElementById('app'), vw = app.clientWidth, vh = app.clientHeight, st = panel.el.style;
-    const w = vw < 600 ? vw - 20 : Math.min(350, vw - 20), x0 = 10, x1 = 10 + w;
-    let top = 60, floor = vh - 10;
+    let w = vw < 600 ? vw - 20 : Math.min(350, vw - 20), x0 = 10, x1 = 10 + w, top = 60, floor = vh - 10;
     rectsIn(TOP_THINGS, x0, x1).forEach((r) => { top = Math.max(top, Math.round(r.bottom) + 8); });
+    // the 3D view's controls, a slim strip down the right edge on narrower screens: stop short of them
+    const v3 = document.querySelector('.panel[data-panel="view3d"]:not(.hidden)'), r3 = v3 && v3.getBoundingClientRect();
+    if (r3 && r3.width > 0 && r3.width < 120 && r3.left < x1 && r3.bottom > top) { x1 = Math.round(r3.left) - 8; w = x1 - x0; }
     rectsIn(LOW_THINGS, x0, x1).forEach((r) => { if (r.top > top) floor = Math.min(floor, Math.round(r.top) - 8); });
-    st.left = x0 + 'px'; st.right = 'auto'; st.width = w + 'px'; st.top = top + 'px'; st.bottom = 'auto'; st.maxHeight = Math.max(140, floor - top) + 'px';
+    st.left = x0 + 'px'; st.right = 'auto'; st.width = w + 'px'; st.top = top + 'px'; st.bottom = 'auto'; st.maxHeight = Math.max(96, floor - top) + 'px';
   }
   function makeRoom() {
     try { document.dispatchEvent(new CustomEvent('creek-lab-panels', { detail: { id: 'health', open: true } })); } catch (e) { /* fine */ }

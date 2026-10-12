@@ -139,7 +139,8 @@
       'max-height:54px;overflow:hidden;word-break:break-word;-webkit-user-select:text;user-select:text}#creekNotice .cn-detail.open{max-height:30vh;overflow:auto}' +
       '#creekNotice .cn-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;margin-top:4px}#creekNotice .cn-row button{min-height:40px;padding:8px 14px;border-radius:999px;font-weight:600;font-size:14px}' +
       '#creekNotice .plain{background:transparent;outline:1.5px solid #cdbf9f}' +
-      '#stormProg .ctl{display:flex;gap:6px;margin-top:6px}#stormProg .ctl button{flex:1;min-height:40px;border-radius:999px;background:var(--paper2);font-size:13px;font-weight:600;padding:0 6px;white-space:nowrap}' +
+      // (a narrow storm box, on a phone, puts the two buttons one above the other instead of letting Fast run off the screen)
+      '#stormProg .ctl{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}#stormProg .ctl button{flex:1 1 auto;min-height:40px;border-radius:999px;background:var(--paper2);font-size:13px;font-weight:600;padding:0 8px;white-space:nowrap}' +
       '#stormProg .ctl button.on{background:#fff6dc;outline:2px solid var(--gold)}' +
       '#fpsBox{position:absolute;z-index:9;left:10px;bottom:calc(136px + var(--safe-b));background:rgba(59,42,26,.82);color:#fff6e6;border-radius:999px;padding:3px 10px;' +
       'font:12px/1.3 ui-monospace,Menlo,Consolas,monospace;pointer-events:none}' +

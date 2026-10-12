@@ -15,6 +15,8 @@
      C  record:   water soaked in (m) | - | deepest water seen (m) | fastest water seen (m/s)
      B  bank map (R32F): lowest ground within ~12 m (so a cell knows how tall its bank is)
      I  the land as it was at the start (never changes) — for "soil lost / gained" views
+     S  (R32F) the ground height when the last storm began (sim.markStorm), so the drawing code can show what this storm cut
+        away and dropped. Tools and undo move it with the land, so only the water's work shows.
      U  undo snapshots of T (several; sim.tex.U is the newest)
    Also here for other code to use: sim.restore(T, M) puts saved land back, sim.sampleLine(...) reads a straight
    line across the land (for cross-sections), sim.probe / read* read single spots or whole grids.  */
@@ -294,6 +296,11 @@ void main(){
 uniform sampler2D u_src; out vec4 o;
 void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
 
+  // S follows a change of the land that the water did not make (a tool, an undo): S + (new height - old height)
+  FS.shift = HEAD + `
+uniform sampler2D u_S, u_A, u_B; out vec4 o;
+void main(){ ivec2 p = ivec2(gl_FragCoord.xy); o = vec4(texelFetch(u_S,p,0).r + texelFetch(u_B,p,0).r - texelFetch(u_A,p,0).r, 0., 0., 1.); }`;
+
   // ---------------------------------------------------------------------------------------------
   function Sim(gl, world) {
     this.gl = gl;
@@ -306,7 +313,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     const z = () => null;
     this.tex = {
       T: [mk(world.T), mk(null)], W: [mk(z()), mk(z())], F: [mk(z()), mk(z())],
-      M: [mk(world.M), mk(null)], C: [mk(z()), mk(z())], A: mk(null, true), B: mk(null, true), U: mk(null), I: mk(world.T)
+      M: [mk(world.M), mk(null)], C: [mk(z()), mk(z())], A: mk(null, true), B: mk(null, true), U: mk(null), I: mk(world.T), S: mk(null, true)
     };
     this.i = { T: 0, W: 0, F: 0, M: 0, C: 0 };
     this.initialT = world.T; this.initialM = world.M;
@@ -314,7 +321,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     this._undoInit();
     this.bankRadius = Math.max(1, Math.round(S.bankRadius / this.dx));
     for (const k of ['W', 'F', 'C']) this.tex[k].forEach(t => this._clear(t));
-    this.refreshBank();
+    this.refreshBank(); this.markStorm();
   }
   const P = Sim.prototype;
 
@@ -440,7 +447,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
       s.i('u_tool', tool); s.v2('u_center', x, y); s.f('u_radius', radius); s.f('u_amount', amount);
       s.f('u_href', href || 0); s.f('u_depth', depth || 0.3);
     });
-    this._flip('T'); this.refreshBank();
+    this._flip('T'); this._shiftS(); this.refreshBank();
   };
 
   /** Switch every ordinary cell of a field to a new cover. */
@@ -475,6 +482,13 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
   P.clearRecord = function () { this.tex.C.forEach(t => this._clear(t)); };
 
   P._copy = function (src, dst) { this._pass('copy', { u_src: src }, [dst]); };
+  /** Remember the ground as it is now as "the land when this storm began" (texture S). The game calls it as a storm starts. */
+  P.markStorm = function () { this._copy(this._cur('T'), this.tex.S); };
+  /** The land just changed from _nxt('T') to _cur('T') by a tool or an undo: move S by the same amount (A is free scratch here). */
+  P._shiftS = function () {
+    this._pass('shift', { u_S: this.tex.S, u_A: this._nxt('T'), u_B: this._cur('T') }, [this.tex.A]);
+    this._copy(this.tex.A, this.tex.S);
+  };
 
   // ---- undo: a stack of land snapshots, newest last. As many as fit in about 100 MB of graphics memory (3 at the 1 m level, 12 otherwise).
   // Older code reads sim.tex.U (the newest snapshot) and sim.undoOK; setting undoOK = false puts the stack aside (sim.restore does that),
@@ -492,7 +506,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
   P.undo = function () {
     this._dropHeld();
     const t = this.undoList.pop(); if (!t) return false;
-    this._copy(t, this._nxt('T')); this._flip('T'); this.refreshBank();
+    this._copy(t, this._nxt('T')); this._flip('T'); this._shiftS(); this.refreshBank();
     this.undoPool.push(t); if (this.undoList.length) this.tex.U = this.undoList[this.undoList.length - 1];
     return true;
   };
@@ -513,7 +527,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     const up = (t, d) => { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.nx, this.ny, gl.RGBA, gl.FLOAT, d); };
     up(this.tex.T[0], this.initialT); this.i.T = 0; up(this.tex.M[0], this.initialM); this.i.M = 0;
     for (const k of ['W', 'F', 'C']) this.tex[k].forEach(t => this._clear(t));
-    this.i.W = 0; this.i.F = 0; this.i.C = 0; this.clearUndo(); this.refreshBank();
+    this.i.W = 0; this.i.F = 0; this.i.C = 0; this.clearUndo(); this.refreshBank(); this.markStorm();
   };
 
   /** Put saved land back: T and M are Float32Arrays (or null to leave that one alone) of length nx*ny*4, laid out like
@@ -528,6 +542,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
       gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.nx, this.ny, gl.RGBA, gl.FLOAT, d);
     };
     up(this._cur('T'), T, 'T'); up(this._cur('M'), M, 'M');
+    if (T) this.markStorm();                              // saved or carried-over land has no "this storm" to show
     this.undoOK = false; this.refreshBank();
     if (this.onRestore) this.onRestore();
   };
@@ -589,7 +604,7 @@ void main(){ o = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0); }`;
     }
     return { q, mudQ: mud };   // mudQ = m³/s of soil being carried
   };
-  P.views = function () { return { T: this._cur('T'), W: this._cur('W'), M: this._cur('M'), C: this._cur('C'), I: this.tex.I, nx: this.nx, ny: this.ny, dx: this.dx }; };
+  P.views = function () { return { T: this._cur('T'), W: this._cur('W'), M: this._cur('M'), C: this._cur('C'), I: this.tex.I, S: this.tex.S, nx: this.nx, ny: this.ny, dx: this.dx }; };
 
   Creek.Sim = Sim;
 })();

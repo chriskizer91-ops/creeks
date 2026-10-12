@@ -287,14 +287,15 @@ Built-in tool kinds (for reference): `look`, `paint` (drag), `stamp` (tap), `cus
 The view button opens a menu of `game.lenses` (each with its `desc`); the V key cycles through them.
 
 ```js
-game.lenses            // [{id, label, toast, desc, legend, lens, activate, deactivate}] built-ins first: "map", "soil", "moved", "flood"
+game.lenses            // [{id, label, toast, desc, legend, lens, activate, deactivate}] built-ins first: "map", "soil", "moved", "flood", "storm"
 game.addLens({ id, label, toast, desc, legend, activate(game), deactivate(game) })   // appends; returns the lens (an existing id is refused with a warning)
 game.setLens(idOrIndex)   // returns false if unknown; emits "lens"(id)
 game.nextLens()
 game.lensIdx, game.lensId // current lens position and id;  game.lens = the number the map renderer gets
 ```
 
-- The built-in lenses keep the renderer indexes `game.lens = 0..3` (map, soil health, soil moved, flood depth). **Module lenses keep `game.lens` at
+- The built-in lenses keep the renderer indexes `game.lens = 0..4` (map, soil health, soil moved since day one, flood depth, and "storm": what the last
+  storm cut away and dropped, measured against the land when it began, which changes while a storm runs). **Module lenses keep `game.lens` at
   0** and do their work through `game.extras` (for example the hydro lens sets `game.extras.flow`).
 - Order of events when the view changes: the old lens's `deactivate(game)`, the new `game.lens`, the new lens's `activate(game)`, then the `"lens"` event
   (the button label and highlight update from it, and the lens's `toast` is shown).
@@ -326,8 +327,15 @@ divided by the peak rain of this storm (0..1), smoothed in real time (about half
 rain is held and no new flashes start.
 
 The state object given to the renderer / provider each frame:
-`{cam: {x, y, scale}, time, contour, lens, hiH, brush: {x, y, r, on}, hints, tint, extras}`. `cam.scale` is device pixels per metre. For a provider it also has
-`width`, `height` (canvas pixels) and `views` (`game.sim.views()`: textures `T, W, M, C, I`, `nx, ny, dx`).
+`{cam: {x, y, scale}, time, contour, lens, hiH, brush: {x, y, r, on}, hints, tint, extras, fresh, storming}`. `cam.scale` is device pixels per metre. `fresh`
+(`game.freshness()`, 1..0) is how raw the last storm's marks still look: 1 during a storm and the season it ends in, then 0.7, 0.45, 0.25, 0.1 and 0 as
+seasons pass. `storming` is 1 while a storm runs. For a provider it also has `width`, `height` (canvas pixels) and `views` (`game.sim.views()`: textures
+`T, W, M, C, I, S`, `nx, ny, dx`).
+
+Drawing with the shared shader (`Creek.GLSL`, `Creek.Shade.bind`): texture units 0..6 are T, W, M, C, I, flow lines, trace, and **unit 7 is `u_S`**, the
+ground height when the last storm began (R32F; see `sim.markStorm`). `u_er` = (fresh, storming, 0, 0). `shadeLand` uses them for the fresh cuts, sand fans,
+rills and the flood's drift line; `waterLayer(w, fp, lit, zk)` also leaves the water's surface normal in `g_wN` and its foam cover in `g_wFoam` for a
+renderer that adds its own reflections (the 3D view). A `views` object without `S` gets the land itself on unit 7, so nothing looks freshly cut.
 
 ---
 
@@ -389,6 +397,9 @@ On `game.sim` (the engine; read its data, never write to textures directly):
   `som` (organic matter 0..1), `soil` (0 clay / 1 loam) and `inside` (1 if the point is on the map). Heights, depth and organic matter are blended between the four
   nearest cells; cover, growth and soil come from the cell itself. Points off the map are read from the nearest edge cell, so check `inside`.
   It reads the textures as they are right now, so it can be called every frame while a storm runs (it costs one sync read-back).
+- **`sim.markStorm()`**: copies the ground heights into texture `S` (`sim.tex.S`, R32F): "the land when this storm began". `game.startStorm` calls it (after the
+  ground is dried out and the record cleared); a new `Sim`, `sim.reset()` and `sim.restore(T, …)` call it too. Tools (`sim.applyTool`) and `sim.undo()` move
+  `S` by the same height change as the land, so the difference `T - S` is only what the water did.
 - Existing: `sim.probe(x, y)`, `sim.readTerrain()`, `sim.readWater()`, `sim.readMoisture()`, `sim.readRecord()`, `sim.flowAcross(...)`, `sim.views()`, `sim.nx`, `sim.ny`, `sim.dx`.
   Read-back calls (`read*`, `probe`, `sampleLine`) stall the GPU: use them on events, not for whole grids every frame.
 

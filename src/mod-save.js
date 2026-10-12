@@ -288,6 +288,7 @@
     game.paused = false; game.fast = false;
     // water and mud on the ground go first (this changes the land a little); the saved land then replaces it exactly
     sim.dryOut(num(s.baseMoist, C.seasons[s.season].moist), 0); sim.clearRecord();
+    game.stormAge = 99; if (game.landDried) game.landDried();          // no water left, and no fresh storm marks on the loaded land
     game.fields.forEach((f, i) => { if (C.uses[s.uses[i]]) f.use = s.uses[i]; });
     game.cash = s.cash; game.ledger = Array.isArray(s.ledger) ? s.ledger : []; game.groundwater = num(s.groundwater, 9000);
     game.year = Math.round(s.year); game.season = s.season; game.baseMoist = num(s.baseMoist, C.seasons[s.season].moist);

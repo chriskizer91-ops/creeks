@@ -504,20 +504,24 @@
     }
     // flood water spreading over the valley floor (the width of the water in the biggest flood of the year). One filled shape per step of
     // brightness rather than one stroke per piece of creek, which is far cheaper to draw.
+    // While a flood you called plays (S.pulse) the water arrives as a brown wave that swells over the floor, then settles to the blue map.
+    const pu = S.lens === 'flood' ? S.pulse : null, front = pu ? Math.min(1, (performance.now() - pu.t0) / pu.dur) * pu.tmax * 1.15 : 1e9;
+    const since = (n) => (front - (n._arr || 0)) / (pu ? pu.tmax : 1);          // how long ago the wave reached this piece of creek (in wave-lengths)
     if (S.lens === 'flood') {
-      const pu = S.pulse, front = pu ? Math.min(1, (performance.now() - pu.t0) / pu.dur) * pu.tmax * 1.15 : 1e9, buckets = [new Path2D(), new Path2D(), new Path2D(), new Path2D()], used = [false, false, false, false];
+      const buckets = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(() => new Path2D()), used = buckets.map(() => false);
       m.nodes.forEach((n) => {
         const d = n.down; if (!d || !n.yMax) return;
-        let a = 1; if (pu) { a = clamp((front - (n._arr || 0)) / (0.12 * pu.tmax), 0, 1); if (a <= 0) return; }
+        let a = 1, brown = 0, swell = 1;
+        if (pu) { const q = since(n); a = clamp(q / 0.12, 0, 1); if (a <= 0) return; brown = q < 0.5 ? 2 : q < 0.9 ? 1 : 0; swell = 1 + 0.35 * Math.exp(-Math.pow((q - 0.06) / 0.07, 2)); }
         const x0 = w2sx(n.x), y0 = w2sy(n.y), x1 = w2sx(d.x), y1 = w2sy(d.y);
         if ((x0 < -80 && x1 < -80) || (x0 > S.w + 80 && x1 > S.w + 80) || (y0 < -80 && y1 < -80) || (y0 > S.h + 80 && y1 > S.h + 80)) return;
         const dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
-        const h0 = Math.max(Math.min(R.widthAt(n, n.yMax), Math.max(n.Wv, R.topWidth(n))) * sc, 2) / 2, h1 = Math.max(Math.min(R.widthAt(d, d.yMax || n.yMax), Math.max(d.Wv, R.topWidth(d))) * sc, 2) / 2;
-        const k = Math.min(3, Math.floor(a * 4 - 1e-6)), P = buckets[Math.max(k, 0)]; used[Math.max(k, 0)] = true;
+        const h0 = swell * Math.max(Math.min(R.widthAt(n, n.yMax), Math.max(n.Wv, R.topWidth(n))) * sc, 2) / 2, h1 = swell * Math.max(Math.min(R.widthAt(d, d.yMax || n.yMax), Math.max(d.Wv, R.topWidth(d))) * sc, 2) / 2;
+        const k = Math.max(0, Math.min(3, Math.floor(a * 4 - 1e-6))) + 4 * brown, P = buckets[k]; used[k] = true;
         P.moveTo(x0 + nx * h0, y0 + ny * h0); P.lineTo(x1 + nx * h1, y1 + ny * h1); P.lineTo(x1 - nx * h1, y1 - ny * h1); P.lineTo(x0 - nx * h0, y0 - ny * h0); P.closePath();
       });
-      ctx.fillStyle = 'rgb(80,150,215)';
-      buckets.forEach((P, k) => { if (!used[k]) return; ctx.globalAlpha = 0.55 * (k + 1) / 4; ctx.fill(P); });
+      const fills = ['rgb(80,150,215)', 'rgb(118,128,128)', 'rgb(146,110,68)'];                 // clear blue, settling, muddy brown
+      buckets.forEach((P, k) => { if (!used[k]) return; ctx.fillStyle = fills[k >> 2]; ctx.globalAlpha = (k < 4 ? 0.55 : 0.65) * (k % 4 + 1) / 4; ctx.fill(P); });
       ctx.globalAlpha = 1;
     }
     // the ranch
@@ -549,6 +553,25 @@
         }
       }
     });
+    // the flood wave on the creeks themselves: a churning brown crest, and foam and drift at its leading edge
+    if (pu) {
+      const crest = [new Path2D(), new Path2D(), new Path2D()], tips = [];
+      m.nodes.forEach((n) => {
+        const d = n.down; if (!d) return; const q = since(n); if (q <= 0 || q > 0.4) return;
+        const x0 = w2sx(n.x), y0 = w2sy(n.y), x1 = w2sx(d.x), y1 = w2sy(d.y);
+        if ((x0 < -50 && x1 < -50) || (x0 > S.w + 50 && x1 > S.w + 50) || (y0 < -50 && y1 < -50) || (y0 > S.h + 50 && y1 > S.h + 50)) return;
+        const P = crest[q < 0.08 ? 2 : q < 0.2 ? 1 : 0]; P.moveTo(x0, y0); P.lineTo(x1, y1);
+        if (q < 0.02 && (!d.down || since(d) <= 0)) tips.push([x1, y1, widthPx(n, n.reach && n.reach.main)]);
+      });
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      crest.forEach((P, k) => { ctx.strokeStyle = 'rgba(132,96,58,' + (0.35 + 0.25 * k) + ')'; ctx.lineWidth = 6 + 4 * k; ctx.stroke(P); });
+      const t = performance.now() / 1000;
+      tips.forEach(([x, y, wp], i) => {
+        const r = wp / 2 + 4 + 1.5 * Math.sin(t * 9 + i);
+        ctx.fillStyle = 'rgba(236,224,196,0.9)'; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
+        ctx.fillStyle = 'rgba(90,64,40,0.8)'; for (let k = 0; k < 3; k++) { const an = t * 2 + i * 1.7 + k * 2.1; ctx.fillRect(x + Math.cos(an) * r * 0.55 - 1.5, y + Math.sin(an) * r * 0.55 - 0.6, 3, 1.2); }
+      });
+    }
     // failures, structures, selection
     if (sc > 0.12) m.nodes.forEach((n) => {
       if (n.acc && n.acc.fail > 0.25) { ctx.fillStyle = 'rgba(190,40,30,0.9)'; ctx.beginPath(); ctx.arc(w2sx(n.x), w2sy(n.y), 3, 0, 6.283); ctx.fill(); }
@@ -762,7 +785,7 @@
 #rvTools::-webkit-scrollbar { display: none; }
 #rvTools .tool small { display: block; font-size: 9.5px; color: var(--ink2); }
 #rvHelp { font-size: 12.5px; color: var(--ink2); padding: 2px 6px 0; min-height: 18px; font-family: Georgia, serif; }
-#rvInfo { position: absolute; left: 8px; right: 8px; bottom: calc(var(--rvtray, 100px) + var(--safe-b)); max-height: 56vh; overflow: auto; background: var(--paper); border-radius: 18px; box-shadow: var(--shadow); font-size: 13.5px; }
+#rvInfo { position: absolute; left: 8px; right: 8px; bottom: calc(var(--rvtray, 100px) + var(--safe-b)); max-height: min(56vh, calc(100% - var(--rvtray, 100px) - var(--safe-b) - var(--safe-t) - 104px)); overflow: auto; background: var(--paper); border-radius: 18px; box-shadow: var(--shadow); font-size: 13.5px; }
 #rvInfo.hidden { display: none; }
 #rvInfo.collapsed .rvbody { display: none; }
 #rvInfo .rvsay { padding: 0 12px; }
@@ -790,7 +813,9 @@
 #rvBusy { position: absolute; left: 50%; top: 42%; transform: translateX(-50%); background: rgba(244,236,216,.96); border-radius: 16px; padding: 12px 16px; box-shadow: var(--shadow); font-size: 14px; width: 230px; text-align: center; z-index: 4; }
 #rvBusy.hidden { display: none; } #rvBusy .bar { height: 8px; border-radius: 6px; background: #d9ccae; overflow: hidden; margin: 8px 0 6px; } #rvBusy .bar div { height: 100%; background: var(--water); width: 0; }
 #rvBusy button { padding: 4px 12px; font-size: 12px; }
-.rvmenu { position: absolute; right: 10px; top: calc(52px + var(--safe-t)); background: var(--paper); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column; gap: 4px; z-index: 6; min-width: 200px; }
+.rvmenu { position: absolute; right: 10px; top: calc(52px + var(--safe-t)); background: var(--paper); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column; gap: 4px; z-index: 6; min-width: 200px;
+  max-width: calc(100vw - 20px); max-height: calc(100% - 62px - var(--safe-t)); overflow: auto; }
+.rvmenu button { flex: 0 0 auto; }
 .rvmenu.hidden { display: none; }
 .rvmenu button { background: var(--paper2); border-radius: 10px; padding: 9px 12px; text-align: left; font-size: 14px; }
 .rvmenu button:active { background: #fff6dc; }
@@ -868,11 +893,13 @@
     }
     mnu.classList.remove('hidden');
   }
-  /** A flood wave runs down the creeks on screen for a few seconds after you call a flood (the water arrives sooner near the heads). */
+  /** A flood wave runs down the creeks on screen for a few seconds after you call a flood (the water arrives sooner near the heads):
+      a brown crest swells over the valley floor with foam and drift at its leading edges, then the water settles to the flood map. */
   function startPulse() {
     const m = S.model; let tmax = 1;
     m.order.forEach((n) => { n._arr = n.ups.reduce((q, u) => Math.max(q, u._arr || 0), 0) + n.len / 3; tmax = Math.max(tmax, n._arr); });
-    S.pulse = { t0: performance.now(), dur: 3200, tmax };
+    if (Creek.settings && Creek.settings.get('reduceMotion', false)) { S.pulse = null; redraw(); return; }     // motion turned down: just show where the flood went
+    S.pulse = { t0: performance.now(), dur: 4200, tmax };
     const tick = () => { if (!S.pulse || !S.open) return; if (performance.now() - S.pulse.t0 > S.pulse.dur + 900) { S.pulse = null; redraw(); return; } redraw(); requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
   }

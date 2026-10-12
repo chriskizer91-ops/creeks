@@ -41,7 +41,10 @@
       legend: { title: 'Soil moved since day one', ramp: ['#bf1f14', '#f29a4c', '#dcd6ca', '#73b2e6', '#144ea8'], left: 'washed away', right: 'built up', note: 'Full colour is a metre or more.' } },
     { id: 'flood', label: '🔵 Flood depth',  lens: 3, toast: 'How deep the water got in the last storm. Dark blue is deepest.',
       desc: 'How deep the water got in the last storm.',
-      legend: { title: 'Deepest water, last storm', ramp: ['#9ed1eb', '#4d8fbf', '#0f2e73'], left: '4 in', right: '10 ft', note: 'No colour: it stayed dry.' } }
+      legend: { title: 'Deepest water, last storm', ramp: ['#9ed1eb', '#4d8fbf', '#0f2e73'], left: '4 in', right: '10 ft', note: 'No colour: it stayed dry.' } },
+    { id: 'storm', label: '🟠 Storm cuts',   lens: 4, toast: 'What the last storm did: red = cut away, blue = dropped. Watch it while a storm runs.',
+      desc: 'What the last storm cut away (red) and dropped (blue). It changes while a storm runs.',
+      legend: { title: 'Soil moved by the last storm', ramp: ['#b81a12', '#f39c4e', '#dcd6ca', '#79b6e8', '#144ea8'], left: 'cut away', right: 'dropped', note: 'Full colour is 1½ ft or more. Pale blue: where it flooded a foot deep or more.' } }
   ];
 
   function Game(canvas) {
@@ -129,7 +132,7 @@
     this.initialAnalysis = this.analyze(this.world.T);
     this.sim.dryOut(this.baseMoist, 0);
     this.sim.clearRecord();
-    this.lastStorm = null; this.analysis = null; this.baseline = null; this.stormHistory = [];
+    this.lastStorm = null; this.analysis = null; this.baseline = null; this.stormHistory = []; this.stormAge = 99; this.landDried();
     this.weather.rain = 0; this.weather.flash = 0;
     this.terrainVersion++;                                // a brand new land: anything cached from the old one is stale
     this.cbs.progress && this.cbs.progress(null);
@@ -532,7 +535,7 @@
     opts = opts || {};
     this.cancelStroke(false);
     if (opts.moist != null) this.sim.dryOut(opts.moist, 0); else this.sim.dryOut(this.baseMoist, 0.5);
-    this.sim.clearRecord();
+    this.sim.clearRecord(); this.sim.markStorm(); this.stormAge = 0;       // the map shows what this storm cuts and drops against the land as it is now
     this.storm = {
       size, t: 0, Q: 0, tag: opts.tag || null, turbo: !!opts.turbo,
       before: this.sim.readTerrain(), peakOut: 0, volOut: 0, mudVol: 0, rainVol: 0, Qnow: 0,
@@ -694,7 +697,7 @@
     this.sim.advanceSeason(this.seasonParams(passing, next));
     this.groundwater *= 0.55;
     if (next === 'summer') this.year++;
-    this.season = next; this.baseMoist = C.seasons[next].moist;
+    this.season = next; this.baseMoist = C.seasons[next].moist; this.stormAge++; this.landDried();
     this.analysis = this.analyze(this.sim.readTerrain());
     this.cashChanged();
     this.cbs.seasonChanged && this.cbs.seasonChanged(this.season, this.year);
@@ -707,7 +710,7 @@
     this.dropStorm();
     this.sim.reset(); this.fields = this.world.meta.fields.map(f => Object.assign({}, f)); this.undoStates = []; this.undoState = null;
     this.cash = C.money.start; this.ledger = []; this.groundwater = 9000; this.year = 1; this.season = 'summer'; this.baseMoist = C.seasons.summer.moist;
-    this.sim.dryOut(this.baseMoist, 0); this.lastStorm = null; this.analysis = null; this.baseline = null; this.stormHistory = [];
+    this.sim.dryOut(this.baseMoist, 0); this.lastStorm = null; this.analysis = null; this.baseline = null; this.stormHistory = []; this.stormAge = 99; this.landDried();
     this.weather.rain = 0; this.weather.flash = 0;
     this.cashChanged(); this.cbs.fieldsChanged && this.cbs.fieldsChanged(); this.cbs.changed && this.cbs.changed();
     this.emit('reset');
@@ -836,7 +839,7 @@
     const state = {
       cam: { x: this.cam.x, y: this.cam.y, scale: this.cam.scale * this.dpr }, time: this.time,
       contour: this.contourOn ? this.contourStep : 0, lens: this.lens, hiH: this.hiH, brush: { x: brush.x, y: brush.y, r: brush.r, on: brush.on },
-      hints, tint, extras: this.extras, hiField: this.hiField || 0
+      hints, tint, extras: this.extras, hiField: this.hiField || 0, fresh: this.freshness(), storming: this.storm ? 1 : 0, wet: this.waterOnMap()
     };
     if (vp) {
       state.width = this.canvas.width; state.height = this.canvas.height; state.views = this.sim.views();
@@ -851,6 +854,16 @@
     this.cbs.scale && this.cbs.scale(vp ? 0 : this.cam.scale);      // 0 = no scale bar (it means nothing in 3D)
     this.cbs.labels && this.cbs.labels();
   };
+  /** Could any water lie on the land? From the start of a storm (or any step of the engine) until the ground is dried out again
+      (a season passes, the ranch starts over, a new detail level). The map draws dry land with a lighter shader. */
+  G.waterOnMap = function () {
+    const sim = this.sim; if (!sim) return false;
+    if (this.storm || sim.stepCount !== this._dryStep) this._dryStep = -1;
+    return this._dryStep !== sim.stepCount;
+  };
+  G.landDried = function () { if (this.sim && !this.storm) this._dryStep = this.sim.stepCount; };
+  /** How raw the last storm's marks still look, 1..0: fresh cuts, sand fans and the flood's drift line weather away over about a year. */
+  G.freshness = function () { const a = this.stormAge == null ? 99 : this.stormAge; return this.storm ? 1 : a > 4 ? 0 : [1, 0.7, 0.45, 0.25, 0.1][a]; };
   /** Put the GL switches back the way the engine and the map renderer expect, in case a provider changed them. */
   G.resetGLState = function () {
     const gl = this.gl;
