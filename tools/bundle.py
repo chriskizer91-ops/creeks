@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Pack the game into ONE html file (plus the assets/ folder) for hosting that wants a single page.
-Usage: python3 tools/bundle.py OUTPUT.html [--embed]
+Usage: python3 tools/bundle.py OUTPUT.html [--embed] [--fragment]
 Normal use does not need this: just serve the folder.
---embed also puts every picture from assets/ inside the page (as data: addresses), so the one file is the whole game.
+--embed also puts every picture from assets/ inside the page (as data: addresses), so the one file is the whole game:
+        it can be downloaded and opened straight from disk, on a computer or a phone.
+--fragment leaves out the document head (doctype, charset, viewport), for a host that wraps the page in its own.
+        Without it the file is a complete page: a page without a doctype is drawn in "quirks mode" (the storm box
+        disappears there), and without the charset and viewport lines a phone shows garbled words at desktop size.
 
 Feature modules: every id listed in Creek.CONFIG.modules (src/config.js) is built in from src/mod-<id>.js.
 At run time main.js skips loading a module that is already registered, so the single file never asks the server
@@ -13,6 +17,8 @@ root = __file__.rsplit('/tools/', 1)[0]
 rd = lambda p: open(root + '/' + p, encoding='utf-8').read()
 html = rd('index.html')
 body = html.split('<body>')[1].split('<script')[0].strip()
+head = html.split('<head>')[1].split('</head>')[0]          # the charset, viewport, colour and title lines, kept in step with index.html
+head = '\n'.join(l for l in head.strip().splitlines() if 'stylesheet' not in l)
 css = rd('style.css')
 
 # the module ids named in the config, in order (the line "modules: ['a', 'b'],")
@@ -45,7 +51,11 @@ js = '\n'.join(parts + mod_src + [rd('src/main.js')])
 worker = 'self.window = self;\n' + rd('src/config.js') + '\n' + rd('src/world.js') + \
     '\nonmessage = function (e) { const d = e.data, r = Creek.generateSlab(d.dx, d.j0, d.j1); postMessage(r, [r.T.buffer, r.M.buffer]); };\n'
 assert '</script' not in worker and '</script' not in js
-out = ('<title>Creek Care</title>\n<meta name="theme-color" content="#f1e7cf">\n<style>\n' + css + '\n</style>\n' + body +
-       '\n<script type="text/plain" id="worker-src">\n' + worker + '\n</script>\n<script>\n' + js + '\n</script>\n')
+scripts = '\n<script type="text/plain" id="worker-src">\n' + worker + '\n</script>\n<script>\n' + js + '\n</script>\n'
+if '--fragment' in sys.argv:
+    out = '<title>Creek Care</title>\n<meta name="theme-color" content="#f1e7cf">\n<style>\n' + css + '\n</style>\n' + body + scripts
+else:
+    out = ('<!doctype html>\n<html lang="en">\n<head>\n' + head + '\n<style>\n' + css + '\n</style>\n</head>\n<body>\n' + body + scripts +
+           '</body>\n</html>\n')
 open(sys.argv[1], 'w', encoding='utf-8').write(out)
 print('wrote', sys.argv[1], len(out), 'bytes', '(modules built in: %s)' % (', '.join(built) or 'none'))

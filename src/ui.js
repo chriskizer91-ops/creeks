@@ -229,8 +229,8 @@
   ui.tick = function () {
     const g = ui.game, st = g.storm; if (!st) return;
     const pct = Math.min(1, st.t / (C.stormBurst + C.stormTail));
-    $('stormBar').style.width = (pct * 100) + '%';
-    $('stormBar').classList.toggle('drain', st.t >= C.stormBurst);
+    $('stormFill').style.width = (pct * 100) + '%';
+    $('stormFill').classList.toggle('drain', st.t >= C.stormBurst);
     const phase = g.paused ? 'Paused' : st.t < C.stormBurst ? '🌧️ Raining' : '💧 Draining';
     $('stormLabel').textContent = phase + ' · ' + Math.round(pct * 100) + '%';
   };

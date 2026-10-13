@@ -483,7 +483,10 @@ The full list of calls is at the top of `tools/testlib.js`. `node tools/smoke.js
 
 ## Bundling
 
-`python3 tools/bundle.py OUT.html` writes one HTML file (plus the `assets/` folder is still needed for pictures). Every module id in `Creek.CONFIG.modules` is inlined from
+`python3 tools/bundle.py OUT.html` writes one HTML file (plus the `assets/` folder is still needed for pictures; `--embed` puts the pictures inside too, so the one
+file is the whole game and opens straight from disk). It is a complete page: doctype, charset and viewport come from `index.html` (without a doctype a browser
+draws the page in quirks mode, where ids are matched without regard to case; without the charset and viewport a phone shows garbled words at desktop size).
+`--fragment` leaves the head out, for a host that wraps the page in its own. Every module id in `Creek.CONFIG.modules` is inlined from
 `src/mod-<id>.js`, and the loader skips modules that are already registered, so no request for `src/mod-*.js` is made for them. Modules not in the config can still be loaded
 from `src/` with `?mods=` / `?addmods=` if the folder is hosted next to the page. The web-worker terrain builder is bundled as before.
 

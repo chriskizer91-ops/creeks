@@ -31,4 +31,4 @@ Address options: `?free=1` skips the title card, `?level=0..3` forces a detail l
 - `NOTES.md`: how the game is put together, the folder map and what still needs checking.
 - `docs/EXTENSION_API.md`: how feature modules plug in.
 - `docs/RIVER_SCALE.md`: the valley model.
-- `python3 tools/bundle.py out.html --embed` packs everything into one file.
+- `python3 tools/bundle.py out.html --embed` packs everything into one file that opens straight from disk, on a computer or a phone.

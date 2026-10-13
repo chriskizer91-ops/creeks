@@ -3,7 +3,7 @@
    Usage:  node tools/smoke.js [root] [extra query, e.g. "mods=example"]
      root   folder to serve (default: the repo root). Point it at a git worktree or an export of any commit.
    Prints one PASS or FAIL line per check, then a total. Exit code 1 if anything failed.
-   Set ONLY=<word> to run just the sections whose name contains it (free play, extension API, storm controls, example module, river scale, story opening, missing module).
+   Set ONLY=<word> to run just the sections whose name contains it (free play, extension API, storm controls, example module, river scale, story opening, single file, missing module).
    Screenshots go to /tmp/creek-work/smoke/. Uses tools/testlib.js (level 3, short storms, never level 0/1).
    Checks that rely on the extension API (events, series...) are skipped with a note when the API is not there. */
 'use strict';
@@ -36,6 +36,8 @@ async function freePlay() {
     check('free play loads at level 3', info.ready && info.level === 3 && info.nx === 350 && info.fields > 5 && info.mode === 'free', info);
     check('?quick=1 shortens storms', info.burst === 150 && info.tail === 90, { burst: info.burst, tail: info.tail });
     check('no console or page errors after loading', t.errors.length === 0, clean(t));
+    const clash = await t.eval(() => { const seen = {}, out = []; document.querySelectorAll('[id]').forEach((e) => { const k = e.id.toLowerCase(); if (seen[k] && seen[k] !== e.id) out.push(seen[k] + ' / ' + e.id); seen[k] = e.id; }); return out; });
+    check('no two element ids differ only in case (a page in quirks mode would mix up their styles)', clash.length === 0, clash);
     if (info.mods.length) check('modules started without errors (' + info.mods.join(', ') + ')', info.modErrors === 0);
     await t.shot('01-free-play');
     const api = info.hasApi;
@@ -551,6 +553,26 @@ async function storyOpening() {
   } finally { await t.close(); }
 }
 
+/** The single-file build (tools/bundle.py) must be a whole page: without a doctype a browser draws it in quirks mode (the storm box
+    vanished there), and without the charset and viewport lines a phone shows garbled words at desktop size. Then it is opened from disk. */
+async function singleFile() {
+  const fs = require('fs'), os = require('os'), cp = require('child_process');
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'creek-bundle-')), 'creek-care.html');
+  cp.execFileSync('python3', [path.join(root, 'tools/bundle.py'), out], { stdio: 'pipe' });
+  const top = fs.readFileSync(out, 'utf8').slice(0, 1024);
+  check('single file: starts with a doctype, the charset and the phone viewport', /^<!doctype html>/i.test(top) && /<meta charset="utf-8">/i.test(top) && /name="viewport"/.test(top), top.slice(0, 120));
+  const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+  const b = await chromium.launch({ executablePath: T.CHROME, headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-dev-shm-usage'] });
+  try {
+    const pg = await (await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage(), errs = [];
+    pg.on('pageerror', (e) => errs.push(String(e)));
+    await pg.goto('file://' + out + '?level=3&quick=1&free=1&tour=0', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.game && window.game.ready, null, { timeout: 180000, polling: 200 });
+    const r = await pg.evaluate(() => { const sb = document.getElementById('stormbar').getBoundingClientRect(); return { mode: document.compatMode, charset: document.characterSet, width: innerWidth, storm: [Math.round(sb.width), Math.round(sb.height)] }; });
+    check('single file opened from disk on a phone: standards mode, UTF-8, phone width, storm box shows', r.mode === 'CSS1Compat' && r.charset === 'UTF-8' && r.width === 390 && r.storm[0] > 60 && r.storm[1] > 20 && r.storm[1] < 300 && !errs.length, { r, errs });
+  } finally { await b.close(); fs.rmSync(path.dirname(out), { recursive: true, force: true }); }
+}
+
 async function missingModule() {
   const t = await T.open({ root, query: 'level=3&quick=1&free=1&mods=nosuchmodule', dir: DIR, ignore: [/nosuchmodule/] });
   try {
@@ -563,7 +585,7 @@ async function missingModule() {
 (async () => {
   console.log('Smoke test: ' + root + (extra ? '  (query +' + extra + ')' : ''));
   const only = process.env.ONLY ? process.env.ONLY.toLowerCase() : '';      // ONLY=api runs just the sections whose name contains "api"
-  for (const [name, fn] of [['free play', freePlay], ['extension API', apiChecks], ['storm controls', stormControls], ['example module', exampleChecks], ['river scale', riverScale], ['story opening', storyOpening], ['missing module', missingModule]]) {
+  for (const [name, fn] of [['free play', freePlay], ['extension API', apiChecks], ['storm controls', stormControls], ['example module', exampleChecks], ['river scale', riverScale], ['story opening', storyOpening], ['single file', singleFile], ['missing module', missingModule]]) {
     if (only && name.toLowerCase().indexOf(only) < 0) continue;
     try { await fn(); } catch (e) { check(name + ' ran to the end', false, String(e && e.stack || e).split('\n').slice(0, 4).join(' | ')); }
   }

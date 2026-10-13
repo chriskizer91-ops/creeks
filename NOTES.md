@@ -55,7 +55,7 @@ topsoil over paler subsoil over the pale limy layer on the rock. The **🟠 Stor
   `save` (save slots and autosave), `view3d` (3D view), `hydro` (water paths, trace, cross-section), `stormgraph` (hydrograph), `life`
   (ranch health, postcards, neighbours), `audio` (rain, water and nature sounds), `coach` (tour and map school), `river` (valley view).
   `example` is a reference module that is not loaded by default (`?addmods=example`).
-- `tools/bundle.py` packs everything into one html file if a host needs that
+- `tools/bundle.py` packs everything into one html file (`--embed`: pictures too, so it opens straight from disk on a computer or a phone)
 - `tools/smoke.js`, `tools/testlib.js`  the browser smoke test (headless Chromium, software GL); `tools/layout.js` the screen-size check
 - `tools/river-test.js`, `tools/river-calibrate.js`, `tools/river-selftest.js`  run the river model in Node (see `docs/RIVER_SCALE.md`)
 - `assets/pictures/`, `assets/extras/`  the painted pictures

@@ -104,8 +104,8 @@ button:disabled { cursor: default; }
 .storm:disabled { opacity: .45; }
 #stormProg { font-size: 12.5px; padding: 4px 2px 1px; }
 #stormBarBox { height: 8px; border-radius: 6px; background: #d9ccae; overflow: hidden; margin-bottom: 6px; }
-#stormBar { height: 100%; width: 0; background: linear-gradient(90deg, #4d8fbf, var(--water)); transition: width .25s linear; }
-#stormBar.drain { background: linear-gradient(90deg, var(--water), #6aa5a0); }
+#stormFill { height: 100%; width: 0; background: linear-gradient(90deg, #4d8fbf, var(--water)); transition: width .25s linear; }
+#stormFill.drain { background: linear-gradient(90deg, var(--water), #6aa5a0); }
 #stormLabel { display: block; margin-bottom: 5px; font-variant-numeric: tabular-nums; }
 #stormProg .go { padding: 6px 10px; font-size: 12px; width: 100%; }
 
